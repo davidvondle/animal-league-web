@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Animal League — Deck Builder</title>
+<style>
+  :root { --bg:#16161a; --panel:#1f1f26; --line:#2e2e38; --text:#eee; --muted:#9a9aa8; --accent:#e0552e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:12px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px;
+           position:sticky; top:0; background:var(--bg); z-index:5; }
+  header h1 { font-size:16px; font-weight:600; margin:0; }
+  #status { color:var(--muted); font-size:13px; }
+  .layout { display:flex; gap:16px; padding:16px; align-items:flex-start; }
+  main { flex:1; min-width:0; }
+  aside { width:300px; flex:none; position:sticky; top:64px; background:var(--panel); border:1px solid var(--line);
+          border-radius:10px; padding:12px; max-height:calc(100vh - 84px); overflow:auto; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:18px 0 8px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
+  .card { position:relative; border-radius:8px; overflow:hidden; cursor:pointer; border:2px solid transparent; background:#000; }
+  .card img { width:100%; display:block; }
+  .card .nm { position:absolute; bottom:0; left:0; right:0; font-size:11px; padding:3px 5px; background:rgba(0,0,0,.6); }
+  .card.in-deck { border-color:var(--accent); }
+  .card .badge { position:absolute; top:5px; right:5px; background:var(--accent); color:#fff; font-size:12px; font-weight:600;
+                 min-width:20px; height:20px; border-radius:10px; display:flex; align-items:center; justify-content:center; padding:0 5px; }
+  aside h3 { font-size:14px; margin:0 0 8px; }
+  .deckrow { display:flex; align-items:center; gap:6px; padding:5px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .deckrow .dn { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .deckrow button { width:22px; height:22px; border:1px solid var(--line); background:#2a2a33; color:var(--text); border-radius:5px; cursor:pointer; }
+  input[type=text], select { width:100%; padding:7px; margin:6px 0; background:#15151a; border:1px solid var(--line); color:var(--text); border-radius:6px; font:inherit; }
+  .btn { display:block; width:100%; padding:9px; background:var(--accent); color:#fff; border:none; border-radius:6px; font-weight:600; cursor:pointer; margin-top:6px; }
+  .total { color:var(--muted); font-size:12px; margin-top:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Animal League — Deck Builder</h1>
+  <span id="status">loading…</span>
+</header>
+<div class="layout">
+  <main id="groups"></main>
+  <aside>
+    <h3>Deck</h3>
+    <select id="loadsel"><option value="">— load a saved deck —</option></select>
+    <div id="deck"></div>
+    <div class="total" id="total"></div>
+    <input type="text" id="deckname" placeholder="deck name">
+    <button class="btn" id="save">Save deck</button>
+    <div id="savemsg" class="total"></div>
+  </aside>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://nxrzzhqywbjafrsthhll.supabase.co";
+const SUPABASE_KEY = "sb_publishable_6Op8-KnLEngJ3YQxpLNtVw_8h3ndtkk";
+const token = new URLSearchParams(location.hash.slice(1)).get("token");
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = (s) => document.querySelector(s);
+
+let cards = {};           // id -> card row
+const deck = new Map();   // id -> {count}
+
+const isSingleton = (c) => !!c.owner_id;   // your animals: one each; shared cards stack
+function groupOf(c) {
+  if (c.owner_id) return "Your cards";
+  if (c.channel_id) return "Group stadiums";
+  return "Available (energy / supporter / stadium)";
+}
+
+async function load() {
+  if (!token) { $("#status").textContent = "missing token — re-run /deckbuilder in Discord"; return; }
+  const { data, error } = await sb.rpc("builder_load", { p_token: token });
+  if (error) { $("#status").textContent = "error: " + error.message; return; }
+  cards = {}; data.forEach((c) => (cards[c.id] = c));
+  $("#status").textContent = data.length + " cards available";
+  renderGroups(data);
+  const { data: decks } = await sb.rpc("builder_decks", { p_token: token });
+  (decks || []).forEach((d) => {
+    const o = document.createElement("option");
+    o.value = d.name; o.textContent = `${d.name} (${d.cards})`;
+    $("#loadsel").appendChild(o);
+  });
+}
+
+function renderGroups(data) {
+  const order = ["Your cards", "Group stadiums", "Available (energy / supporter / stadium)"];
+  const groups = {};
+  data.forEach((c) => { (groups[groupOf(c)] ||= []).push(c); });
+  const root = $("#groups"); root.innerHTML = "";
+  order.forEach((g) => {
+    const list = groups[g];
+    if (!list || !list.length) return;
+    const h = document.createElement("h2"); h.textContent = `${g} (${list.length})`; root.appendChild(h);
+    const grid = document.createElement("div"); grid.className = "grid";
+    list.sort((a, b) => a.name.localeCompare(b.name)).forEach((c) => grid.appendChild(cardEl(c)));
+    root.appendChild(grid);
+  });
+}
+
+function cardEl(c) {
+  const d = document.createElement("div"); d.className = "card"; d.dataset.id = c.id;
+  d.innerHTML = `<img loading="lazy" decoding="async" src="${c.image_url}"><div class="nm">${c.name}</div>`;
+  d.onclick = () => addToDeck(c.id);
+  return d;
+}
+
+function addToDeck(id) {
+  const c = cards[id]; const cur = deck.get(id)?.count || 0;
+  if (isSingleton(c)) { if (cur) return; deck.set(id, { count: 1 }); }
+  else deck.set(id, { count: cur + 1 });
+  renderDeck();
+}
+function setCount(id, delta) {
+  const e = deck.get(id); if (!e) return;
+  e.count += delta;
+  if (e.count <= 0) deck.delete(id);
+  renderDeck();
+}
+
+function renderDeck() {
+  document.querySelectorAll(".card").forEach((el) => {
+    const e = deck.get(el.dataset.id);
+    el.classList.toggle("in-deck", !!e);
+    let b = el.querySelector(".badge");
+    if (e) { if (!b) { b = document.createElement("div"); b.className = "badge"; el.appendChild(b); } b.textContent = e.count; }
+    else if (b) b.remove();
+  });
+  const root = $("#deck"); root.innerHTML = ""; let total = 0;
+  [...deck.entries()].sort((a, b) => cards[a[0]].name.localeCompare(cards[b[0]].name)).forEach(([id, e]) => {
+    total += e.count;
+    const c = cards[id]; const row = document.createElement("div"); row.className = "deckrow";
+    row.innerHTML = `<span class="dn">${c.name}</span>`;
+    if (isSingleton(c)) {
+      const rm = document.createElement("button"); rm.textContent = "×"; rm.onclick = () => setCount(id, -1); row.append(rm);
+    } else {
+      const minus = document.createElement("button"); minus.textContent = "–"; minus.onclick = () => setCount(id, -1);
+      const cnt = document.createElement("span"); cnt.textContent = e.count; cnt.style.minWidth = "16px"; cnt.style.textAlign = "center";
+      const plus = document.createElement("button"); plus.textContent = "+"; plus.onclick = () => setCount(id, 1);
+      row.append(minus, cnt, plus);
+    }
+    root.appendChild(row);
+  });
+  $("#total").textContent = `${total} card${total === 1 ? "" : "s"}, ${deck.size} unique`;
+}
+
+$("#save").onclick = async () => {
+  const name = $("#deckname").value.trim();
+  if (!name) { $("#savemsg").textContent = "enter a deck name"; return; }
+  if (!deck.size) { $("#savemsg").textContent = "deck is empty"; return; }
+  $("#savemsg").textContent = "saving…";
+  const arr = [...deck.entries()].map(([card_id, e]) => ({ card_id, count: e.count }));
+  const { error } = await sb.rpc("builder_save_deck", { p_token: token, p_name: name, p_cards: arr });
+  $("#savemsg").textContent = error ? "error: " + error.message : `saved “${name}” ✓`;
+};
+
+$("#loadsel").onchange = async (ev) => {
+  const name = ev.target.value; if (!name) return;
+  const { data } = await sb.rpc("builder_deck", { p_token: token, p_name: name });
+  deck.clear();
+  (data || []).forEach((r) => { if (cards[r.card_id]) deck.set(r.card_id, { count: r.count }); });
+  $("#deckname").value = name;
+  renderDeck();
+};
+
+load();
+</script>
+</body>
+</html>
