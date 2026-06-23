@@ -16,6 +16,10 @@
   main { flex:1; min-width:0; }
   aside { width:300px; flex:none; position:sticky; top:64px; background:var(--panel); border:1px solid var(--line);
           border-radius:10px; padding:12px; max-height:calc(100vh - 84px); overflow:auto; }
+  .deckhandle { all:unset; box-sizing:border-box; display:flex; align-items:center; justify-content:space-between;
+                width:100%; font-size:14px; font-weight:600; color:var(--text); }
+  .deckhandle .chev { display:none; color:var(--muted); }
+  #deckbody { margin-top:8px; }
   h2 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:18px 0 8px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
   .card { position:relative; border-radius:8px; overflow:hidden; cursor:pointer; border:2px solid transparent; background:#000; }
@@ -24,7 +28,19 @@
   .card.in-deck { border-color:var(--accent); }
   .card .badge { position:absolute; top:5px; right:5px; background:var(--accent); color:#fff; font-size:12px; font-weight:600;
                  min-width:20px; height:20px; border-radius:10px; display:flex; align-items:center; justify-content:center; padding:0 5px; }
-  aside h3 { font-size:14px; margin:0 0 8px; }
+  @media (max-width: 680px) {
+    .layout { display:block; padding:12px; }
+    main { padding-bottom:60px; }
+    aside { position:fixed; left:0; right:0; bottom:0; top:auto; width:auto; margin:0; border-radius:14px 14px 0 0;
+            max-height:82vh; overflow:hidden; display:flex; flex-direction:column; z-index:20;
+            transform:translateY(calc(100% - 52px)); transition:transform .25s ease;
+            box-shadow:0 -8px 24px rgba(0,0,0,.45); }
+    aside.open { transform:translateY(0); }
+    .deckhandle { cursor:pointer; padding:6px 0; }
+    .deckhandle .chev { display:inline; transition:transform .25s ease; }
+    aside.open .deckhandle .chev { transform:rotate(180deg); }
+    #deckbody { overflow:auto; }
+  }
   .deckrow { display:flex; align-items:center; gap:6px; padding:5px 0; border-bottom:1px solid var(--line); font-size:13px; }
   .deckrow .dn { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .deckrow button { width:22px; height:22px; border:1px solid var(--line); background:#2a2a33; color:var(--text); border-radius:5px; cursor:pointer; }
@@ -40,14 +56,16 @@
 </header>
 <div class="layout">
   <main id="groups"></main>
-  <aside>
-    <h3>Deck</h3>
-    <select id="loadsel"><option value="">— load a saved deck —</option></select>
-    <div id="deck"></div>
-    <div class="total" id="total"></div>
-    <input type="text" id="deckname" placeholder="deck name">
-    <button class="btn" id="save">Save deck</button>
-    <div id="savemsg" class="total"></div>
+  <aside id="deckpanel">
+    <button class="deckhandle" id="deckhandle"><span id="deckcount">Deck</span><span class="chev">▲</span></button>
+    <div id="deckbody">
+      <select id="loadsel"><option value="">— load a saved deck —</option></select>
+      <div id="deck"></div>
+      <div class="total" id="total"></div>
+      <input type="text" id="deckname" placeholder="deck name">
+      <button class="btn" id="save">Save deck</button>
+      <div id="savemsg" class="total"></div>
+    </div>
   </aside>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -107,8 +125,12 @@ function cardEl(c) {
 
 function addToDeck(id) {
   const c = cards[id]; const cur = deck.get(id)?.count || 0;
-  if (isSingleton(c)) { if (cur) return; deck.set(id, { count: 1 }); }
-  else deck.set(id, { count: cur + 1 });
+  if (isSingleton(c)) {
+    if (cur) deck.delete(id);            // second tap unselects
+    else deck.set(id, { count: 1 });
+  } else {
+    deck.set(id, { count: cur + 1 });    // shared cards stack; use – to remove
+  }
   renderDeck();
 }
 function setCount(id, delta) {
@@ -142,7 +164,12 @@ function renderDeck() {
     root.appendChild(row);
   });
   $("#total").textContent = `${total} card${total === 1 ? "" : "s"}, ${deck.size} unique`;
+  $("#deckcount").textContent = total ? `Deck · ${total}` : "Deck";
 }
+
+$("#deckhandle").onclick = () => {
+  if (window.matchMedia("(max-width: 680px)").matches) $("#deckpanel").classList.toggle("open");
+};
 
 $("#save").onclick = async () => {
   const name = $("#deckname").value.trim();
