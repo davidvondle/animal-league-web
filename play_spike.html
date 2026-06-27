@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Animal League — Hidden-Hand Spike</title>
+<style>
+  body { margin:0; font-family:-apple-system,"Segoe UI",Roboto,sans-serif; background:#16161a; color:#eee; padding:16px; }
+  h1 { font-size:16px; margin:0 0 4px; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#9a9aa8; margin:18px 0 8px; }
+  .muted { color:#9a9aa8; font-size:13px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start; }
+  .row img { width:96px; height:134px; border-radius:8px; display:block; }
+  button { padding:8px 12px; background:#e0552e; color:#fff; border:none; border-radius:6px; font-weight:600; cursor:pointer; }
+  #log { font-size:13px; color:#cdd8d8; background:#1f1f26; border-radius:8px; padding:6px 12px; max-height:180px; overflow:auto; }
+  #log div { padding:3px 0; border-bottom:1px solid #2e2e38; }
+</style>
+</head>
+<body>
+<h1>Animal League — hidden-hand spike</h1>
+<div id="status" class="muted">loading…</div>
+<div class="row" style="margin:12px 0;">
+  <button id="draw">Draw</button>
+  <button id="shuffle">Shuffle deck</button>
+  <button id="coin">Flip coin</button>
+</div>
+<h2>Your hand — <span id="dc">?</span> left in deck</h2>
+<div id="hand" class="row"></div>
+<div id="opps"></div>
+<h2>Game log (live)</h2>
+<div id="log"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SB_URL = "https://nxrzzhqywbjafrsthhll.supabase.co", SB_KEY = "sb_publishable_6Op8-KnLEngJ3YQxpLNtVw_8h3ndtkk";
+const BACK = SB_URL + "/storage/v1/object/public/cards/assets/card-back.png";
+const token = new URLSearchParams(location.hash.slice(1)).get("token");
+const sb = supabase.createClient(SB_URL, SB_KEY);
+const $ = (s) => document.querySelector(s);
+let gameId = null, subbed = false;
+
+async function refresh() {
+  if (!token) { $("#status").textContent = "missing token in the URL (#token=…)"; return; }
+  const { data, error } = await sb.rpc("game_view", { p_token: token });
+  if (error) { $("#status").textContent = "error: " + error.message + " (try reloading)"; return; }
+  gameId = data.game_id;
+  $("#status").textContent = `You are seat ${data.seat} (${data.kind}) · state v${data.version}`;
+  $("#dc").textContent = data.you.deck_count;
+  $("#hand").innerHTML = (data.you.hand || []).map(c => `<img src="${c.url}" title="${c.name}">`).join("")
+                         || '<span class="muted">empty</span>';
+  $("#opps").innerHTML = (data.opponents || []).map(o => {
+    const backs = Array.from({ length: o.hand_count }).map(() => `<img src="${BACK}">`).join("");
+    return `<h2>Seat ${o.seat} — ${o.hand_count} in hand · ${o.deck_count} in deck</h2>`
+         + `<div class="row">${backs || '<span class="muted">no cards in hand</span>'}</div>`;
+  }).join("") || '<h2>Opponents</h2><span class="muted">waiting…</span>';
+
+  if (gameId && !subbed) {
+    subbed = true;
+    sb.channel("game-" + gameId)
+      .on("postgres_changes",
+          { event: "INSERT", schema: "public", table: "game_events", filter: `game_id=eq.${gameId}` },
+          (p) => { const d = document.createElement("div"); d.textContent = p.new.text; $("#log").prepend(d); refresh(); })
+      .subscribe();
+  }
+}
+
+async function act(type) {
+  const { error } = await sb.rpc("game_action", { p_token: token, p_action: { type } });
+  if (error) alert(error.message); else refresh();
+}
+$("#draw").onclick = () => act("draw");
+$("#shuffle").onclick = () => act("shuffle");
+$("#coin").onclick = () => act("coin");
+refresh();
+</script>
+</body>
+</html>
