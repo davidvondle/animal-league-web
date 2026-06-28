@@ -88,7 +88,7 @@ const STAD = {x:1476,y:1005};
 const mir = (z)=>({x:ZW-z.x-(z.w||CW), y:ZH-z.y-(z.h||CH), w:z.w||CW, h:z.h||CH});
 const pct = (z)=>`left:${z.x/ZW*100}%;top:${z.y/ZH*100}%;width:${(z.w||CW)/ZW*100}%;height:${(z.h||CH)/ZH*100}%`;
 
-let gameId=null, subbed=false, mySeat=null, lastView=null;
+let gameId=null, subbed=false, mySeat=null, lastView=null, amPlayer=true;
 
 function slot(id, z, drop){
   const d=document.createElement("div"); d.className="zone"+(drop?" drop":""); d.id=id;
@@ -119,7 +119,7 @@ function buildBoard(){
 function cardEl(c, from){
   const w=document.createElement("div"); w.className="cardwrap";
   const img=document.createElement("img"); img.className="card"; img.src=c.url; img.title=c.name;
-  if(from){ img.draggable=true; img.style.cursor="grab";
+  if(from && amPlayer){ img.draggable=true; img.style.cursor="grab";
     img.addEventListener("dragstart", e=>e.dataTransfer.setData("json", JSON.stringify({kind:"card",card:c.id,from})));
     img.addEventListener("click", ()=>{ const hp=prompt(`HP for ${c.name} (blank to clear):`, c.hp??""); if(hp!==null) update(from,c.id,{hp:hp===""?null:parseInt(hp)});});
     w.addEventListener("dragover", e=>e.preventDefault());
@@ -136,7 +136,7 @@ function cardEl(c, from){
   if(c.tokens&&c.tokens.length){ const corners=["tl","tr","bl","br"];
     c.tokens.forEach((t,idx)=>{ const ty=t.type||t, corner=(t&&t.corner)||corners[idx%4];
       const ci=document.createElement("img"); ci.className="chip "+corner; ci.src=TOKMAP[ty]||""; ci.title=ty;
-      if(from){ ci.draggable=true;
+      if(from && amPlayer){ ci.draggable=true;
         ci.addEventListener("dragstart", e=>{ e.stopPropagation(); e.dataTransfer.setData("json", JSON.stringify({kind:"chip",idx})); });
         ci.addEventListener("click", ev=>{ ev.stopPropagation(); removeToken(from,c.id,idx); }); }
       w.append(ci); }); }
@@ -173,7 +173,9 @@ async function refresh(){
   if(!token){$("#status").textContent="missing token";return;}
   const {data,error}=await sb.rpc("game_view",{p_token:token});
   if(error){$("#status").textContent="error: "+error.message;return;}
-  gameId=data.game_id; mySeat=data.seat; lastView=data;
+  gameId=data.game_id; mySeat=data.seat; lastView=data; amPlayer=(data.kind!=="spectator");
+  $("#tray").style.display=amPlayer?"flex":"none"; $("#hand").style.display=amPlayer?"flex":"none";
+  const _c=document.querySelector("header .controls"); if(_c) _c.style.display=amPlayer?"flex":"none";
   $("#status").textContent=`seat ${data.seat} · v${data.version}`;
   const you=data.you, opp=(data.opponents||[])[0]||{active:[],bench:[],discard:[],hand_count:0,deck_count:0,prizes_count:0};
   fill("#you-active",you.active,"active"); fill("#you-bench",you.bench,"bench");
