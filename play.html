@@ -43,6 +43,12 @@
   .tback { transform:rotateX(180deg); }
   .chip { position:absolute; width:24px; height:24px; cursor:grab; filter:drop-shadow(0 1px 2px rgba(0,0,0,.7)); }
   .chip.tl{top:3px;left:3px;} .chip.tr{top:3px;right:3px;} .chip.bl{bottom:3px;left:3px;} .chip.br{bottom:3px;right:3px;}
+  .hpctl { position:absolute; top:3px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:3px;
+           background:rgba(0,0,0,.72); border-radius:11px; padding:1px 4px; color:#fff; font-size:12px; font-weight:700; line-height:1; z-index:3; }
+  .hpctl button { display:none; width:16px; height:16px; padding:0; border:none; border-radius:50%; background:#e0552e; color:#fff; font-size:13px; cursor:pointer; }
+  .cardwrap:hover .hpctl button { display:inline-flex; align-items:center; justify-content:center; }
+  .attached { position:absolute; left:10%; right:10%; bottom:-11%; display:flex; gap:2px; justify-content:center; z-index:-1; }
+  .attached img { width:32%; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,.5); }
   .coin { width:82px; height:82px; cursor:pointer; perspective:600px; transition:transform .35s cubic-bezier(.34,1.5,.5,1); }
   .coin.flipping { transform:translateX(-72px) scale(1.7); z-index:50; }
   .coinflip { position:relative; width:100%; height:100%; transform-style:preserve-3d; }
@@ -118,10 +124,15 @@ function buildBoard(){
 }
 function cardEl(c, from){
   const w=document.createElement("div"); w.className="cardwrap";
+  // attached cards (e.g. energy) peek out from behind the animal and travel with it
+  if(c.attached && c.attached.length){ const at=document.createElement("div"); at.className="attached";
+    c.attached.forEach(a=>{ const ai=document.createElement("img"); ai.src=a.url; ai.title=a.name; at.append(ai); }); w.append(at); }
   const img=document.createElement("img"); img.className="card"; img.src=c.url; img.title=c.name;
-  if(from && amPlayer){ img.draggable=true; img.style.cursor="grab";
-    img.addEventListener("dragstart", e=>e.dataTransfer.setData("json", JSON.stringify({kind:"card",card:c.id,from})));
-    img.addEventListener("click", ()=>{ const hp=prompt(`HP for ${c.name} (blank to clear):`, c.hp??""); if(hp!==null) update(from,c.id,{hp:hp===""?null:parseInt(hp)});});
+  // a stadium card can only be moved by the player who owns it
+  const canDrag = from && amPlayer && (from!=="stadium" || c.owner===mySeat);
+  if(canDrag){ img.draggable=true; img.style.cursor="grab";
+    img.addEventListener("dragstart", e=>e.dataTransfer.setData("json", JSON.stringify({kind:"card",card:c.id,from}))); }
+  if(from && amPlayer){
     w.addEventListener("dragover", e=>e.preventDefault());
     w.addEventListener("drop", e=>{ e.preventDefault(); e.stopPropagation();
       const m=JSON.parse(e.dataTransfer.getData("json"));
@@ -129,10 +140,17 @@ function cardEl(c, from){
       else if(m.kind==="chip"){ const r=w.getBoundingClientRect();
         const corner=((e.clientY-r.top)<r.height/2?"t":"b")+((e.clientX-r.left)<r.width/2?"l":"r");
         setTokenCorner(from,c.id,m.idx,corner); }
-      else if(m.kind==="card") move(m.from,from,m.card); });
+      else if(m.kind==="card" && m.card!==c.id) attach(m.from,m.card,from,c.id); });  // drop a card ONTO a card → stack behind it
   }
   w.append(img);
-  if(c.hp!=null){ const b=document.createElement("div"); b.className="hp"; b.textContent=c.hp; w.append(b);}
+  // HP counter (animals carry one): value always shown; hover reveals −/+ (step 10) on your own cards
+  if(c.hp!=null){ const hc=document.createElement("div"); hc.className="hpctl";
+    if(from && amPlayer){ const mn=document.createElement("button"); mn.textContent="−";
+      mn.addEventListener("click", ev=>{ ev.stopPropagation(); setHP(from,c.id,Math.max(0,(c.hp||0)-10)); }); hc.append(mn); }
+    const v=document.createElement("span"); v.className="hpval"; v.textContent=c.hp; hc.append(v);
+    if(from && amPlayer){ const pl=document.createElement("button"); pl.textContent="+";
+      pl.addEventListener("click", ev=>{ ev.stopPropagation(); setHP(from,c.id,(c.hp||0)+10); }); hc.append(pl); }
+    w.append(hc); }
   if(c.tokens&&c.tokens.length){ const corners=["tl","tr","bl","br"];
     c.tokens.forEach((t,idx)=>{ const ty=t.type||t, corner=(t&&t.corner)||corners[idx%4];
       const ci=document.createElement("img"); ci.className="chip "+corner; ci.src=TOKMAP[ty]||""; ci.title=ty;
@@ -192,12 +210,14 @@ async function refresh(){
   fill("#hand",you.hand,"hand");
   if(gameId && !subbed){ subbed=true;
     sb.channel("g"+gameId).on("postgres_changes",{event:"INSERT",schema:"public",table:"game_events",filter:`game_id=eq.${gameId}`},
-      p=>{const d=document.createElement("div");d.textContent=p.new.text;$("#log").prepend(d);refresh();}).subscribe(); }
+      p=>{ if(p.new.text){ const d=document.createElement("div"); d.textContent=p.new.text; $("#log").prepend(d); } refresh(); }).subscribe(); }
 }
 function tag(sel,n){ const e=document.createElement("div"); e.className="count"; e.textContent=n; $(sel).append(e); }
 async function action(a){ const {error}=await sb.rpc("game_action",{p_token:token,p_action:a}); if(error)alert(error.message); else refresh(); }
 const move=(from,to,card)=>action({type:"move",from,to,card});
 const update=(zone,card,patch,silent)=>action({type:"update_card",zone,card,patch,silent});
+const attach=(from,card,zone,target)=>action({type:"attach",from,card,zone,target});  // stack `card` behind `target`
+const setHP=(zone,id,hp)=>update(zone,id,{hp},true);  // silent: syncs to opponent, no log spam
 let coinRot=0, coinBusy=false;
 async function flipCoin(){
   if(coinBusy) return; coinBusy=true;
