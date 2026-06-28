@@ -41,8 +41,13 @@
   .tface { position:absolute; inset:0; backface-visibility:hidden; }
   .tface img { width:100%; height:100%; display:block; }
   .tback { transform:rotateX(180deg); }
-  .chips { position:absolute; left:3px; bottom:3px; display:flex; gap:2px; }
-  .chip { width:22px; height:22px; cursor:pointer; filter:drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+  .chip { position:absolute; width:24px; height:24px; cursor:grab; filter:drop-shadow(0 1px 2px rgba(0,0,0,.7)); }
+  .chip.tl{top:3px;left:3px;} .chip.tr{top:3px;right:3px;} .chip.bl{bottom:3px;left:3px;} .chip.br{bottom:3px;right:3px;}
+  .coin { width:82px; height:82px; cursor:pointer; perspective:600px; transition:transform .35s cubic-bezier(.34,1.5,.5,1); }
+  .coin.flipping { transform:translateX(-72px) scale(1.7); z-index:50; }
+  .coinflip { position:relative; width:100%; height:100%; transform-style:preserve-3d; }
+  .cface { position:absolute; inset:0; width:100%; height:100%; backface-visibility:hidden; border-radius:50%; }
+  .cback { transform:rotateY(180deg); }
   #log div { padding:3px 0; border-bottom:1px solid #2a2a33; }
   #peek { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:20; }
   #peekbox { background:#1f1f26; border-radius:12px; padding:16px; max-width:80vw; max-height:80vh; overflow:auto; }
@@ -57,7 +62,6 @@
     <button id="draw">Draw</button>
     <button id="shuffle" class="ghost">Shuffle</button>
     <button id="search" class="ghost">Search deck</button>
-    <button id="coin" class="ghost">Flip coin</button>
   </span>
 </header>
 <div class="stage">
@@ -94,7 +98,7 @@ function slot(id, z, drop){
     d.addEventListener("dragover", e=>{e.preventDefault(); d.classList.add("over");});
     d.addEventListener("dragleave", ()=>d.classList.remove("over"));
     d.addEventListener("drop", e=>{e.preventDefault(); d.classList.remove("over");
-      const m=JSON.parse(e.dataTransfer.getData("json")); if(m.kind!=="token") move(m.from, drop, m.card);});
+      const m=JSON.parse(e.dataTransfer.getData("json")); if(m.kind==="card") move(m.from, drop, m.card);});
   }
   return d;
 }
@@ -121,14 +125,21 @@ function cardEl(c, from){
     w.addEventListener("dragover", e=>e.preventDefault());
     w.addEventListener("drop", e=>{ e.preventDefault(); e.stopPropagation();
       const m=JSON.parse(e.dataTransfer.getData("json"));
-      if(m.kind==="token") addToken(from,c.id,m.type); else if(m.kind==="card") move(m.from,from,m.card); });
+      if(m.kind==="token") addToken(from,c.id,m.type);
+      else if(m.kind==="chip"){ const r=w.getBoundingClientRect();
+        const corner=((e.clientY-r.top)<r.height/2?"t":"b")+((e.clientX-r.left)<r.width/2?"l":"r");
+        setTokenCorner(from,c.id,m.idx,corner); }
+      else if(m.kind==="card") move(m.from,from,m.card); });
   }
   w.append(img);
   if(c.hp!=null){ const b=document.createElement("div"); b.className="hp"; b.textContent=c.hp; w.append(b);}
-  if(c.tokens&&c.tokens.length){ const tr=document.createElement("div"); tr.className="chips";
-    c.tokens.forEach((ty,idx)=>{ const ci=document.createElement("img"); ci.className="chip"; ci.src=TOKMAP[ty]||""; ci.title=ty;
-      if(from) ci.addEventListener("click", ev=>{ ev.stopPropagation(); removeToken(from,c.id,idx); }); tr.append(ci); });
-    w.append(tr); }
+  if(c.tokens&&c.tokens.length){ const corners=["tl","tr","bl","br"];
+    c.tokens.forEach((t,idx)=>{ const ty=t.type||t, corner=(t&&t.corner)||corners[idx%4];
+      const ci=document.createElement("img"); ci.className="chip "+corner; ci.src=TOKMAP[ty]||""; ci.title=ty;
+      if(from){ ci.draggable=true;
+        ci.addEventListener("dragstart", e=>{ e.stopPropagation(); e.dataTransfer.setData("json", JSON.stringify({kind:"chip",idx})); });
+        ci.addEventListener("click", ev=>{ ev.stopPropagation(); removeToken(from,c.id,idx); }); }
+      w.append(ci); }); }
   return w;
 }
 function backs(n){ return Array.from({length:n}).map(()=>{const i=document.createElement("img");i.className="card";i.src=BACK;return i;}); }
@@ -144,6 +155,9 @@ const TOKENS=[
 ];
 const TOKMAP=Object.fromEntries(TOKENS.map(t=>[t.type,t.front]));
 function buildTray(){ const tray=$("#tray"); tray.innerHTML="";
+  const coin=document.createElement("div"); coin.className="coin"; coin.id="coin";
+  coin.innerHTML=`<div class="coinflip"><img class="cface" src="${TT}coin-heads.png"><img class="cface cback" src="${TT}coin-tails.png"></div>`;
+  coin.addEventListener("click", flipCoin); tray.append(coin);
   TOKENS.forEach(t=>{ const el=document.createElement("div"); el.className="token"; el.draggable=true; el.title=t.type;
     el.innerHTML=`<div class="flipper"><div class="tface"><img src="${t.front}"></div><div class="tface tback"><img src="${t.back}"></div></div>`;
     el.addEventListener("click",()=>el.classList.toggle("flipped"));
@@ -151,8 +165,9 @@ function buildTray(){ const tray=$("#tray"); tray.innerHTML="";
     tray.append(el); });
 }
 const cardTokens=(zone,id)=>{ const c=((lastView&&lastView.you&&lastView.you[zone])||[]).find(x=>x.id===id); return (c&&c.tokens)||[]; };
-const addToken=(zone,id,type)=>update(zone,id,{tokens:[...cardTokens(zone,id),type]});
+const addToken=(zone,id,type)=>{ const cur=cardTokens(zone,id); update(zone,id,{tokens:[...cur,{type,corner:["tl","tr","bl","br"][cur.length%4]}]}); };
 const removeToken=(zone,id,idx)=>{ const t=[...cardTokens(zone,id)]; t.splice(idx,1); update(zone,id,{tokens:t}); };
+const setTokenCorner=(zone,id,idx,corner)=>{ const arr=cardTokens(zone,id).map(x=>typeof x==="string"?{type:x}:{...x}); if(!arr[idx])return; arr[idx].corner=corner; update(zone,id,{tokens:arr}); };
 
 async function refresh(){
   if(!token){$("#status").textContent="missing token";return;}
@@ -181,9 +196,21 @@ function tag(sel,n){ const e=document.createElement("div"); e.className="count";
 async function action(a){ const {error}=await sb.rpc("game_action",{p_token:token,p_action:a}); if(error)alert(error.message); else refresh(); }
 const move=(from,to,card)=>action({type:"move",from,to,card});
 const update=(zone,card,patch)=>action({type:"update_card",zone,card,patch});
+let coinRot=0, coinBusy=false;
+async function flipCoin(){
+  if(coinBusy) return; coinBusy=true;
+  const {data,error}=await sb.rpc("game_action",{p_token:token,p_action:{type:"coin"}});
+  if(error){coinBusy=false; alert(error.message); return;}
+  const tails=/TAILS/i.test(data.text);
+  const coin=$("#coin"), flip=coin.querySelector(".coinflip");
+  coin.classList.add("flipping");
+  const base=coinRot+360*4, want=tails?180:0; coinRot=base+(((want-(base%360))%360)+360)%360;
+  flip.style.transition="transform 1.15s cubic-bezier(.15,.6,.25,1)";
+  flip.style.transform=`rotateY(${coinRot}deg)`;
+  setTimeout(()=>{ coin.classList.remove("flipping"); refresh(); coinBusy=false; }, 1200);
+}
 $("#draw").onclick=()=>action({type:"draw"});
 $("#shuffle").onclick=()=>action({type:"shuffle"});
-$("#coin").onclick=()=>action({type:"coin"});
 $("#search").onclick=async()=>{ const {data,error}=await sb.rpc("game_action",{p_token:token,p_action:{type:"peek"}});
   if(error)return alert(error.message);
   $("#peekrow").innerHTML=""; (data.deck||[]).forEach(c=>{const i=document.createElement("img");i.src=c.url;i.title=c.name;
@@ -195,7 +222,7 @@ const hd=$("#hand");
 hd.addEventListener("dragover", e=>{e.preventDefault(); hd.classList.add("over");});
 hd.addEventListener("dragleave", ()=>hd.classList.remove("over"));
 hd.addEventListener("drop", e=>{e.preventDefault(); hd.classList.remove("over");
-  const m=JSON.parse(e.dataTransfer.getData("json")); if(m.kind!=="token") move(m.from,"hand",m.card);});
+  const m=JSON.parse(e.dataTransfer.getData("json")); if(m.kind==="card") move(m.from,"hand",m.card);});
 buildTray(); buildBoard(); refresh();
 </script>
 </body>
