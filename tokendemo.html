@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Animal League — Token flip</title>
+<style>
+  body { margin:0; height:100vh; overflow:hidden; background:#1b1b1f; color:#eee;
+         font-family:-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .hint { position:fixed; left:22px; top:22px; color:#9a9aa8; font-size:14px; max-width:320px; line-height:1.5; }
+  #tray { position:fixed; right:30px; top:50%; transform:translateY(-50%);
+          display:flex; flex-direction:column; gap:22px; }
+  .token { width:70px; height:70px; cursor:pointer;
+           transition:transform .42s cubic-bezier(.34,1.56,.5,1); }
+  .token.flipped { transform:scale(2.7); z-index:40; }
+  .flipper { position:relative; width:100%; height:100%; transform-style:preserve-3d;
+             transition:transform .5s cubic-bezier(.34,1.4,.5,1); }
+  .token.flipped .flipper { transform:rotateX(180deg); }
+  .face { position:absolute; inset:0; backface-visibility:hidden; border-radius:50%;
+          display:flex; align-items:center; justify-content:center; overflow:hidden;
+          box-shadow:0 4px 12px rgba(0,0,0,.5); }
+  .face img { width:100%; height:100%; display:block; }
+  .back { transform:rotateX(180deg); background:#fff; color:#1a1a1a; border:3px solid #000;
+          flex-direction:column; text-align:center; padding:7px; }
+  .back b { font-size:8.5px; text-transform:uppercase; letter-spacing:.4px; }
+  .back span { font-size:6px; line-height:1.28; margin-top:3px; }
+</style></head>
+<body>
+<div class="hint"><b>Token flip</b><br>Click a token → it pops bigger and flips over (pseudo-3D) to show what it does. Click again to flip back. The Confuse token is your real art; the rest are placeholders.</div>
+<div id="tray"></div>
+<script>
+const SB="https://nxrzzhqywbjafrsthhll.supabase.co/storage/v1/object/public/cards/assets/tokens/";
+const circle=(c,l)=>`<div style="width:100%;height:100%;border-radius:50%;background:${c};border:3px solid #000;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:30px">${l}</div>`;
+const TOKENS=[
+ {front:`<img src="${SB}confuse.svg">`, name:"Confused", text:"Between turns, flip a coin. If tails, this Animal does 30 damage to itself."},
+ {front:circle('#7CB342','P'), name:"Poisoned", text:"Put 1 damage counter on this Animal between turns."},
+ {front:circle('#E0552E','B'), name:"Burned", text:"Flip a coin between turns; if tails, put 2 damage counters."},
+ {front:circle('#3A8FD0','S'), name:"Asleep", text:"Can't attack or retreat. Flip a coin between turns to wake."},
+];
+const tray=document.getElementById('tray');
+TOKENS.forEach(t=>{
+  const el=document.createElement('div'); el.className='token';
+  el.innerHTML=`<div class="flipper"><div class="face front">${t.front}</div><div class="face back"><b>${t.name}</b><span>${t.text}</span></div></div>`;
+  el.onclick=()=>el.classList.toggle('flipped');
+  tray.append(el);
+});
+</script>
+</body></html>
