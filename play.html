@@ -33,7 +33,7 @@
   h2 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#9a9aa8; margin:0 0 6px; }
   #logpanel { position:fixed; right:10px; bottom:10px; width:220px; background:rgba(21,21,26,.94); border-radius:10px; padding:8px 10px; z-index:30; }
   #log { font-size:12px; color:#cdd8d8; max-height:34vh; overflow:auto; }
-  #tray { position:fixed; right:14px; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; gap:14px; z-index:25; }
+  #tray { position:fixed; right:14px; top:58px; display:flex; flex-direction:column; gap:14px; z-index:25; }
   .token { width:54px; height:54px; cursor:pointer; transform-origin:100% 50%; transition:transform .42s cubic-bezier(.34,1.56,.5,1); }
   .token.flipped { transform:scale(2.7); z-index:40; }
   .flipper { position:relative; width:100%; height:100%; transform-style:preserve-3d; transition:transform .5s cubic-bezier(.34,1.4,.5,1); }
@@ -167,7 +167,7 @@ function buildTray(){ const tray=$("#tray"); tray.innerHTML="";
 const cardTokens=(zone,id)=>{ const c=((lastView&&lastView.you&&lastView.you[zone])||[]).find(x=>x.id===id); return (c&&c.tokens)||[]; };
 const addToken=(zone,id,type)=>{ const cur=cardTokens(zone,id); update(zone,id,{tokens:[...cur,{type,corner:["tl","tr","bl","br"][cur.length%4]}]}); };
 const removeToken=(zone,id,idx)=>{ const t=[...cardTokens(zone,id)]; t.splice(idx,1); update(zone,id,{tokens:t}); };
-const setTokenCorner=(zone,id,idx,corner)=>{ const arr=cardTokens(zone,id).map(x=>typeof x==="string"?{type:x}:{...x}); if(!arr[idx])return; arr[idx].corner=corner; update(zone,id,{tokens:arr}); };
+const setTokenCorner=(zone,id,idx,corner)=>{ const arr=cardTokens(zone,id).map(x=>typeof x==="string"?{type:x}:{...x}); if(!arr[idx])return; arr[idx].corner=corner; update(zone,id,{tokens:arr},true); };
 
 async function refresh(){
   if(!token){$("#status").textContent="missing token";return;}
@@ -195,7 +195,7 @@ async function refresh(){
 function tag(sel,n){ const e=document.createElement("div"); e.className="count"; e.textContent=n; $(sel).append(e); }
 async function action(a){ const {error}=await sb.rpc("game_action",{p_token:token,p_action:a}); if(error)alert(error.message); else refresh(); }
 const move=(from,to,card)=>action({type:"move",from,to,card});
-const update=(zone,card,patch)=>action({type:"update_card",zone,card,patch});
+const update=(zone,card,patch,silent)=>action({type:"update_card",zone,card,patch,silent});
 let coinRot=0, coinBusy=false;
 async function flipCoin(){
   if(coinBusy) return; coinBusy=true;
