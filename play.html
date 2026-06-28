@@ -129,7 +129,7 @@ function cardEl(c, from){
     c.attached.forEach(a=>{ const ai=document.createElement("img"); ai.src=a.url; ai.title=a.name; at.append(ai); }); w.append(at); }
   const img=document.createElement("img"); img.className="card"; img.src=c.url; img.title=c.name;
   // a stadium card can only be moved by the player who owns it
-  const canDrag = from && amPlayer && (from!=="stadium" || c.owner===mySeat);
+  const canDrag = from && amPlayer && (from!=="stadium" || String(c.owner)===String(mySeat));
   if(canDrag){ img.draggable=true; img.style.cursor="grab";
     img.addEventListener("dragstart", e=>e.dataTransfer.setData("json", JSON.stringify({kind:"card",card:c.id,from}))); }
   if(from && amPlayer){
