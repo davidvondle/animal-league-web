@@ -48,7 +48,13 @@
   .hpctl button { display:none; width:16px; height:16px; padding:0; border:none; border-radius:50%; background:#e0552e; color:#fff; font-size:13px; cursor:pointer; }
   .cardwrap:hover .hpctl button { display:inline-flex; align-items:center; justify-content:center; }
   .attached { position:absolute; left:10%; right:10%; bottom:-11%; display:flex; gap:2px; justify-content:center; z-index:-1; }
-  .attached img { width:32%; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,.5); }
+  .attached img { width:32%; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,.5); cursor:pointer; }
+  /* fanned-out: a little popover above the card; each attached card is clickable to detach */
+  .cardwrap.fanned .attached { left:50%; right:auto; transform:translateX(-50%); bottom:104%; z-index:6;
+    flex-wrap:wrap; gap:4px; padding:5px; max-width:240px; background:rgba(20,20,26,.94);
+    border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,.55); }
+  .cardwrap.fanned .attached img { width:46px; box-shadow:0 1px 4px rgba(0,0,0,.5); }
+  .cardwrap.fanned .attached img:hover { outline:2px solid #ffd34d; }
   .coin { width:82px; height:82px; cursor:pointer; perspective:600px; transition:transform .35s cubic-bezier(.34,1.5,.5,1); }
   .coin.flipping { transform:translateX(-72px) scale(1.7); z-index:50; }
   .coinflip { position:relative; width:100%; height:100%; transform-style:preserve-3d; }
@@ -94,7 +100,7 @@ const STAD = {x:1476,y:1005};
 const mir = (z)=>({x:ZW-z.x-(z.w||CW), y:ZH-z.y-(z.h||CH), w:z.w||CW, h:z.h||CH});
 const pct = (z)=>`left:${z.x/ZW*100}%;top:${z.y/ZH*100}%;width:${(z.w||CW)/ZW*100}%;height:${(z.h||CH)/ZH*100}%`;
 
-let gameId=null, subbed=false, mySeat=null, lastView=null, amPlayer=true;
+let gameId=null, subbed=false, mySeat=null, lastView=null, amPlayer=true, fannedId=null;
 
 function slot(id, z, drop){
   const d=document.createElement("div"); d.className="zone"+(drop?" drop":""); d.id=id;
@@ -124,14 +130,21 @@ function buildBoard(){
 }
 function cardEl(c, from){
   const w=document.createElement("div"); w.className="cardwrap";
-  // attached cards (e.g. energy) peek out from behind the animal and travel with it
+  // attached cards (e.g. energy) sit behind the animal and travel with it.
+  // click the stack to fan it out; click a fanned card to detach it (→ discard)
   if(c.attached && c.attached.length){ const at=document.createElement("div"); at.className="attached";
-    c.attached.forEach(a=>{ const ai=document.createElement("img"); ai.src=a.url; ai.title=a.name; at.append(ai); }); w.append(at); }
+    c.attached.forEach(a=>{ const ai=document.createElement("img"); ai.src=a.url; ai.title=a.name+" — click to discard";
+      if(from && amPlayer) ai.addEventListener("click", ev=>{ ev.stopPropagation();
+        if(w.classList.contains("fanned")) detach(from,c.id,a.id); else setFan(c.id,w); });
+      at.append(ai); }); w.append(at);
+    if(c.id===fannedId) w.classList.add("fanned"); }
   const img=document.createElement("img"); img.className="card"; img.src=c.url; img.title=c.name;
   // a stadium card can only be moved by the player who owns it
   const canDrag = from && amPlayer && (from!=="stadium" || String(c.owner)===String(mySeat));
   if(canDrag){ img.draggable=true; img.style.cursor="grab";
     img.addEventListener("dragstart", e=>e.dataTransfer.setData("json", JSON.stringify({kind:"card",card:c.id,from}))); }
+  if(from && amPlayer && c.attached && c.attached.length)
+    img.addEventListener("click", ev=>{ ev.stopPropagation(); setFan(fannedId===c.id?null:c.id, w); });
   if(from && amPlayer){
     w.addEventListener("dragover", e=>e.preventDefault());
     w.addEventListener("drop", e=>{ e.preventDefault(); e.stopPropagation();
@@ -218,6 +231,9 @@ const move=(from,to,card)=>action({type:"move",from,to,card});
 const update=(zone,card,patch,silent)=>action({type:"update_card",zone,card,patch,silent});
 const attach=(from,card,zone,target)=>action({type:"attach",from,card,zone,target});  // stack `card` behind `target`
 const setHP=(zone,id,hp)=>update(zone,id,{hp},true);  // silent: syncs to opponent, no log spam
+const detach=(zone,host,att,to)=>action({type:"detach",zone,card:host,att,to});  // pull a card off the stack (default → discard)
+const setFan=(id,wEl)=>{ document.querySelectorAll(".cardwrap.fanned").forEach(el=>el.classList.remove("fanned"));
+  fannedId=id; if(id&&wEl) wEl.classList.add("fanned"); };  // only one stack fanned open at a time
 let coinRot=0, coinBusy=false;
 async function flipCoin(){
   if(coinBusy) return; coinBusy=true;
