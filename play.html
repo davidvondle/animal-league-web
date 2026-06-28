@@ -13,25 +13,25 @@
   .controls { margin-left:auto; display:flex; gap:6px; }
   button { padding:7px 11px; background:#e0552e; color:#fff; border:none; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; }
   button.ghost { background:#2a2a33; }
-  .wrap { display:flex; gap:12px; padding:12px; align-items:flex-start; }
-  #boardbox { position:relative; width:min(72vw,1000px); aspect-ratio:2366/2233;
+  .stage { display:flex; flex-direction:column; align-items:center; gap:8px; padding:10px; }
+  #boardbox { position:relative; height:min(70vh,92vw); aspect-ratio:2366/2233;
               background:center/contain no-repeat; border-radius:14px; flex:none; }
   .zone { position:absolute; display:flex; gap:3px; align-items:center; justify-content:center; }
   .zone.drop { outline:2px dashed transparent; border-radius:8px; }
   .zone.drop.over { outline-color:#ffd34d; background:rgba(255,211,77,.12); }
-  .card { height:100%; border-radius:6px; box-shadow:0 2px 6px rgba(0,0,0,.5); }
-  .bench .card, .hand .card { height:92%; }
+  .card { max-width:100%; max-height:100%; border-radius:6px; box-shadow:0 2px 6px rgba(0,0,0,.5); }
+  .bench .card { height:96%; max-width:none; }
   .cardwrap { position:relative; height:100%; }
   .hp { position:absolute; top:-6px; right:-6px; background:#e0552e; color:#fff; font-size:12px;
         font-weight:700; min-width:20px; height:20px; border-radius:10px; display:flex; align-items:center; justify-content:center; padding:0 4px; }
   .count { position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,.7); color:#fff; font-size:12px;
            border-radius:8px; padding:0 6px; }
-  aside { width:240px; flex:none; }
-  #hand { display:flex; gap:6px; min-height:150px; background:#15151a; border-radius:10px; padding:8px;
+  #hand { display:flex; gap:6px; width:min(74vh,94vw); height:150px; background:#15151a; border-radius:10px; padding:8px;
           align-items:center; overflow-x:auto; }
-  #hand .card { height:140px; cursor:grab; }
+  #hand .card { height:130px; max-width:none; cursor:grab; }
   h2 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#9a9aa8; margin:0 0 6px; }
-  #log { font-size:12px; color:#cdd8d8; background:#15151a; border-radius:10px; padding:6px 10px; max-height:240px; overflow:auto; }
+  #logpanel { position:fixed; right:10px; bottom:10px; width:220px; background:rgba(21,21,26,.94); border-radius:10px; padding:8px 10px; z-index:30; }
+  #log { font-size:12px; color:#cdd8d8; max-height:34vh; overflow:auto; }
   #log div { padding:3px 0; border-bottom:1px solid #2a2a33; }
   #peek { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:20; }
   #peekbox { background:#1f1f26; border-radius:12px; padding:16px; max-width:80vw; max-height:80vh; overflow:auto; }
@@ -49,15 +49,11 @@
     <button id="coin" class="ghost">Flip coin</button>
   </span>
 </header>
-<div class="wrap">
+<div class="stage">
   <div id="boardbox"></div>
-  <aside>
-    <h2>Your hand</h2>
-    <div id="hand" class="hand zone drop" data-zone="hand"></div>
-    <h2 style="margin-top:14px">Game log</h2>
-    <div id="log"></div>
-  </aside>
+  <div id="hand" class="hand zone drop" data-zone="hand"></div>
 </div>
+<div id="logpanel"><h2>Game log</h2><div id="log"></div></div>
 <div id="peek"><div id="peekbox"><h2>Your deck — click a card to take it to hand</h2><div class="row" id="peekrow"></div><button id="peekclose" class="ghost" style="margin-top:10px">Close</button></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -129,12 +125,12 @@ async function refresh(){
   fill("#you-discard",you.discard?.slice(-1),"discard");
   $("#you-deck").innerHTML=""; if(you.deck_count){$("#you-deck").append(backs(1)[0]); tag("#you-deck",you.deck_count);}
   if(you.discard?.length) tag("#you-discard",you.discard.length);
-  PRIZES.forEach((p,i)=>{ const el=$("#you-prize"+i); el.innerHTML=""; const n=Math.min(2,Math.max(0,you.prizes_count-i*2)); backs(n).forEach(b=>el.append(b)); });
+  PRIZES.forEach((p,i)=>{ const el=$("#you-prize"+i); el.innerHTML=""; const n=Math.min(2,Math.max(0,you.prizes_count-i*2)); if(n){el.append(backs(1)[0]); tag("#you-prize"+i,n);} });
   // opponent (public zones real; hidden as backs/counts)
   fill("#opp-active",opp.active); fill("#opp-bench",opp.bench);
   fill("#opp-discard",(opp.discard||[]).slice(-1)); if(opp.discard?.length) tag("#opp-discard",opp.discard.length);
   $("#opp-deck").innerHTML=""; if(opp.deck_count){$("#opp-deck").append(backs(1)[0]); tag("#opp-deck",opp.deck_count);}
-  PRIZES.forEach((p,i)=>{ const el=$("#opp-prize"+i); el.innerHTML=""; const n=Math.min(2,Math.max(0,opp.prizes_count-i*2)); backs(n).forEach(b=>el.append(b)); });
+  PRIZES.forEach((p,i)=>{ const el=$("#opp-prize"+i); el.innerHTML=""; const n=Math.min(2,Math.max(0,opp.prizes_count-i*2)); if(n){el.append(backs(1)[0]); tag("#opp-prize"+i,n);} });
   fill("#stadium",data.shared?.stadium,"stadium");
   fill("#hand",you.hand,"hand");
   if(gameId && !subbed){ subbed=true;
