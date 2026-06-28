@@ -33,6 +33,16 @@
   h2 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#9a9aa8; margin:0 0 6px; }
   #logpanel { position:fixed; right:10px; bottom:10px; width:220px; background:rgba(21,21,26,.94); border-radius:10px; padding:8px 10px; z-index:30; }
   #log { font-size:12px; color:#cdd8d8; max-height:34vh; overflow:auto; }
+  #tray { position:fixed; right:14px; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; gap:14px; z-index:25; }
+  .token { width:54px; height:54px; cursor:pointer; transform-origin:100% 50%; transition:transform .42s cubic-bezier(.34,1.56,.5,1); }
+  .token.flipped { transform:scale(2.7); z-index:40; }
+  .flipper { position:relative; width:100%; height:100%; transform-style:preserve-3d; transition:transform .5s cubic-bezier(.34,1.4,.5,1); }
+  .token.flipped .flipper { transform:rotateX(180deg); }
+  .tface { position:absolute; inset:0; backface-visibility:hidden; }
+  .tface img { width:100%; height:100%; display:block; }
+  .tback { transform:rotateX(180deg); }
+  .chips { position:absolute; left:3px; bottom:3px; display:flex; gap:2px; }
+  .chip { width:22px; height:22px; cursor:pointer; filter:drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
   #log div { padding:3px 0; border-bottom:1px solid #2a2a33; }
   #peek { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:20; }
   #peekbox { background:#1f1f26; border-radius:12px; padding:16px; max-width:80vw; max-height:80vh; overflow:auto; }
@@ -55,6 +65,7 @@
   <div id="hand" class="hand" data-zone="hand"></div>
 </div>
 <div id="logpanel"><h2>Game log</h2><div id="log"></div></div>
+<div id="tray"></div>
 <div id="peek"><div id="peekbox"><h2>Your deck — click a card to take it to hand</h2><div class="row" id="peekrow"></div><button id="peekclose" class="ghost" style="margin-top:10px">Close</button></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -73,7 +84,7 @@ const STAD = {x:1476,y:1005};
 const mir = (z)=>({x:ZW-z.x-(z.w||CW), y:ZH-z.y-(z.h||CH), w:z.w||CW, h:z.h||CH});
 const pct = (z)=>`left:${z.x/ZW*100}%;top:${z.y/ZH*100}%;width:${(z.w||CW)/ZW*100}%;height:${(z.h||CH)/ZH*100}%`;
 
-let gameId=null, subbed=false, mySeat=null;
+let gameId=null, subbed=false, mySeat=null, lastView=null;
 
 function slot(id, z, drop){
   const d=document.createElement("div"); d.className="zone"+(drop?" drop":""); d.id=id;
@@ -83,7 +94,7 @@ function slot(id, z, drop){
     d.addEventListener("dragover", e=>{e.preventDefault(); d.classList.add("over");});
     d.addEventListener("dragleave", ()=>d.classList.remove("over"));
     d.addEventListener("drop", e=>{e.preventDefault(); d.classList.remove("over");
-      const m=JSON.parse(e.dataTransfer.getData("json")); move(m.from, drop, m.card);});
+      const m=JSON.parse(e.dataTransfer.getData("json")); if(m.kind!=="token") move(m.from, drop, m.card);});
   }
   return d;
 }
@@ -104,22 +115,50 @@ function buildBoard(){
 function cardEl(c, from){
   const w=document.createElement("div"); w.className="cardwrap";
   const img=document.createElement("img"); img.className="card"; img.src=c.url; img.title=c.name;
-  if(from){ img.draggable=true; img.addEventListener("dragstart", e=>e.dataTransfer.setData("json", JSON.stringify({card:c.id,from})));
-    img.style.cursor="grab";
+  if(from){ img.draggable=true; img.style.cursor="grab";
+    img.addEventListener("dragstart", e=>e.dataTransfer.setData("json", JSON.stringify({kind:"card",card:c.id,from})));
     img.addEventListener("click", ()=>{ const hp=prompt(`HP for ${c.name} (blank to clear):`, c.hp??""); if(hp!==null) update(from,c.id,{hp:hp===""?null:parseInt(hp)});});
+    w.addEventListener("dragover", e=>e.preventDefault());
+    w.addEventListener("drop", e=>{ e.preventDefault(); e.stopPropagation();
+      const m=JSON.parse(e.dataTransfer.getData("json"));
+      if(m.kind==="token") addToken(from,c.id,m.type); else if(m.kind==="card") move(m.from,from,m.card); });
   }
   w.append(img);
   if(c.hp!=null){ const b=document.createElement("div"); b.className="hp"; b.textContent=c.hp; w.append(b);}
+  if(c.tokens&&c.tokens.length){ const tr=document.createElement("div"); tr.className="chips";
+    c.tokens.forEach((ty,idx)=>{ const ci=document.createElement("img"); ci.className="chip"; ci.src=TOKMAP[ty]||""; ci.title=ty;
+      if(from) ci.addEventListener("click", ev=>{ ev.stopPropagation(); removeToken(from,c.id,idx); }); tr.append(ci); });
+    w.append(tr); }
   return w;
 }
 function backs(n){ return Array.from({length:n}).map(()=>{const i=document.createElement("img");i.className="card";i.src=BACK;return i;}); }
 function fill(id, cards, from){ const el=$(id); if(!el)return; el.innerHTML=""; (cards||[]).forEach(c=>el.append(cardEl(c,from))); }
 
+const TT=SB_URL+"/storage/v1/object/public/cards/assets/tokens/";
+const TOKENS=[
+ {type:"confuse", front:TT+"confuse.svg",  back:TT+"confuse-back.svg"},
+ {type:"burn",    front:TT+"burn.svg",     back:TT+"burn-back.svg"},
+ {type:"paralyze",front:TT+"paralyze.svg", back:TT+"paralyze-back.svg"},
+ {type:"poison",  front:TT+"poison.svg",   back:TT+"poison-back.svg"},
+ {type:"sleep",   front:TT+"sleep.svg",    back:TT+"sleep-back.svg"},
+];
+const TOKMAP=Object.fromEntries(TOKENS.map(t=>[t.type,t.front]));
+function buildTray(){ const tray=$("#tray"); tray.innerHTML="";
+  TOKENS.forEach(t=>{ const el=document.createElement("div"); el.className="token"; el.draggable=true; el.title=t.type;
+    el.innerHTML=`<div class="flipper"><div class="tface"><img src="${t.front}"></div><div class="tface tback"><img src="${t.back}"></div></div>`;
+    el.addEventListener("click",()=>el.classList.toggle("flipped"));
+    el.addEventListener("dragstart",e=>e.dataTransfer.setData("json",JSON.stringify({kind:"token",type:t.type})));
+    tray.append(el); });
+}
+const cardTokens=(zone,id)=>{ const c=((lastView&&lastView.you&&lastView.you[zone])||[]).find(x=>x.id===id); return (c&&c.tokens)||[]; };
+const addToken=(zone,id,type)=>update(zone,id,{tokens:[...cardTokens(zone,id),type]});
+const removeToken=(zone,id,idx)=>{ const t=[...cardTokens(zone,id)]; t.splice(idx,1); update(zone,id,{tokens:t}); };
+
 async function refresh(){
   if(!token){$("#status").textContent="missing token";return;}
   const {data,error}=await sb.rpc("game_view",{p_token:token});
   if(error){$("#status").textContent="error: "+error.message;return;}
-  gameId=data.game_id; mySeat=data.seat;
+  gameId=data.game_id; mySeat=data.seat; lastView=data;
   $("#status").textContent=`seat ${data.seat} · v${data.version}`;
   const you=data.you, opp=(data.opponents||[])[0]||{active:[],bench:[],discard:[],hand_count:0,deck_count:0,prizes_count:0};
   fill("#you-active",you.active,"active"); fill("#you-bench",you.bench,"bench");
@@ -156,8 +195,8 @@ const hd=$("#hand");
 hd.addEventListener("dragover", e=>{e.preventDefault(); hd.classList.add("over");});
 hd.addEventListener("dragleave", ()=>hd.classList.remove("over"));
 hd.addEventListener("drop", e=>{e.preventDefault(); hd.classList.remove("over");
-  const m=JSON.parse(e.dataTransfer.getData("json")); move(m.from,"hand",m.card);});
-buildBoard(); refresh();
+  const m=JSON.parse(e.dataTransfer.getData("json")); if(m.kind!=="token") move(m.from,"hand",m.card);});
+buildTray(); buildBoard(); refresh();
 </script>
 </body>
 </html>
