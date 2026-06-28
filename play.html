@@ -164,7 +164,7 @@ function buildTray(){ const tray=$("#tray"); tray.innerHTML="";
     el.addEventListener("dragstart",e=>e.dataTransfer.setData("json",JSON.stringify({kind:"token",type:t.type})));
     tray.append(el); });
 }
-const cardTokens=(zone,id)=>{ const c=((lastView&&lastView.you&&lastView.you[zone])||[]).find(x=>x.id===id); return (c&&c.tokens)||[]; };
+const cardTokens=(zone,id)=>{ const src = zone==="stadium" ? (lastView&&lastView.shared&&lastView.shared.stadium) : (lastView&&lastView.you&&lastView.you[zone]); const c=(src||[]).find(x=>x.id===id); return (c&&c.tokens)||[]; };
 const addToken=(zone,id,type)=>{ const cur=cardTokens(zone,id); update(zone,id,{tokens:[...cur,{type,corner:["tl","tr","bl","br"][cur.length%4]}]}); };
 const removeToken=(zone,id,idx)=>{ const t=[...cardTokens(zone,id)]; t.splice(idx,1); update(zone,id,{tokens:t}); };
 const setTokenCorner=(zone,id,idx,corner)=>{ const arr=cardTokens(zone,id).map(x=>typeof x==="string"?{type:x}:{...x}); if(!arr[idx])return; arr[idx].corner=corner; update(zone,id,{tokens:arr},true); };
