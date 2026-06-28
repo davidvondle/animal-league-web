@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Animal League — Play</title>
+<style>
+  :root { --slot:#646464; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI",Roboto,sans-serif; background:#1b1b1f; color:#eee; }
+  header { display:flex; align-items:center; gap:10px; padding:8px 14px; background:#111; }
+  header b { font-size:15px; } #status { color:#9a9aa8; font-size:13px; }
+  .controls { margin-left:auto; display:flex; gap:6px; }
+  button { padding:7px 11px; background:#e0552e; color:#fff; border:none; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; }
+  button.ghost { background:#2a2a33; }
+  .wrap { display:flex; gap:12px; padding:12px; align-items:flex-start; }
+  #boardbox { position:relative; width:min(72vw,1000px); aspect-ratio:2366/2233;
+              background:center/contain no-repeat; border-radius:14px; flex:none; }
+  .zone { position:absolute; display:flex; gap:3px; align-items:center; justify-content:center; }
+  .zone.drop { outline:2px dashed transparent; border-radius:8px; }
+  .zone.drop.over { outline-color:#ffd34d; background:rgba(255,211,77,.12); }
+  .card { height:100%; border-radius:6px; box-shadow:0 2px 6px rgba(0,0,0,.5); }
+  .bench .card, .hand .card { height:92%; }
+  .cardwrap { position:relative; height:100%; }
+  .hp { position:absolute; top:-6px; right:-6px; background:#e0552e; color:#fff; font-size:12px;
+        font-weight:700; min-width:20px; height:20px; border-radius:10px; display:flex; align-items:center; justify-content:center; padding:0 4px; }
+  .count { position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,.7); color:#fff; font-size:12px;
+           border-radius:8px; padding:0 6px; }
+  aside { width:240px; flex:none; }
+  #hand { display:flex; gap:6px; min-height:150px; background:#15151a; border-radius:10px; padding:8px;
+          align-items:center; overflow-x:auto; }
+  #hand .card { height:140px; cursor:grab; }
+  h2 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#9a9aa8; margin:0 0 6px; }
+  #log { font-size:12px; color:#cdd8d8; background:#15151a; border-radius:10px; padding:6px 10px; max-height:240px; overflow:auto; }
+  #log div { padding:3px 0; border-bottom:1px solid #2a2a33; }
+  #peek { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:20; }
+  #peekbox { background:#1f1f26; border-radius:12px; padding:16px; max-width:80vw; max-height:80vh; overflow:auto; }
+  #peekbox .row { display:flex; flex-wrap:wrap; gap:8px; }
+  #peekbox img { height:150px; border-radius:6px; cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <b>Animal League</b> <span id="status">loading…</span>
+  <span class="controls">
+    <button id="draw">Draw</button>
+    <button id="shuffle" class="ghost">Shuffle</button>
+    <button id="search" class="ghost">Search deck</button>
+    <button id="coin" class="ghost">Flip coin</button>
+  </span>
+</header>
+<div class="wrap">
+  <div id="boardbox"></div>
+  <aside>
+    <h2>Your hand</h2>
+    <div id="hand" class="hand zone drop" data-zone="hand"></div>
+    <h2 style="margin-top:14px">Game log</h2>
+    <div id="log"></div>
+  </aside>
+</div>
+<div id="peek"><div id="peekbox"><h2>Your deck — click a card to take it to hand</h2><div class="row" id="peekrow"></div><button id="peekclose" class="ghost" style="margin-top:10px">Close</button></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SB_URL="https://nxrzzhqywbjafrsthhll.supabase.co", SB_KEY="sb_publishable_6Op8-KnLEngJ3YQxpLNtVw_8h3ndtkk";
+const BACK = SB_URL + "/storage/v1/object/public/cards/assets/card-back.png";
+const BOARD = SB_URL + "/storage/v1/object/public/cards/assets/board-2p.svg";
+const token = new URLSearchParams(location.hash.slice(1)).get("token");
+const sb = supabase.createClient(SB_URL, SB_KEY);
+const $ = s => document.querySelector(s);
+
+const ZW=2366, ZH=2233, CW=165, CH=238;
+const P1 = { active:{x:1119,y:1354}, bench:{x:567,y:1863,w:1269,h:266}, deck:{x:1928,y:1538}, discard:{x:1928,y:1271} };
+const PRIZES = [{x:281,y:1857},{x:281,y:1554},{x:281,y:1251}];
+const STAD = {x:1476,y:1005};
+const mir = (z)=>({x:ZW-z.x-(z.w||CW), y:ZH-z.y-(z.h||CH), w:z.w||CW, h:z.h||CH});
+const pct = (z)=>`left:${z.x/ZW*100}%;top:${z.y/ZH*100}%;width:${(z.w||CW)/ZW*100}%;height:${(z.h||CH)/ZH*100}%`;
+
+let gameId=null, subbed=false, mySeat=null;
+
+function slot(id, z, drop){
+  const d=document.createElement("div"); d.className="zone"+(drop?" drop":""); d.id=id;
+  if(drop) d.dataset.zone = drop;
+  d.style.cssText = pct(z);
+  if(drop){
+    d.addEventListener("dragover", e=>{e.preventDefault(); d.classList.add("over");});
+    d.addEventListener("dragleave", ()=>d.classList.remove("over"));
+    d.addEventListener("drop", e=>{e.preventDefault(); d.classList.remove("over");
+      const m=JSON.parse(e.dataTransfer.getData("json")); move(m.from, drop, m.card);});
+  }
+  return d;
+}
+function buildBoard(){
+  const bb=$("#boardbox"); bb.style.backgroundImage=`url(${BOARD})`; bb.innerHTML="";
+  // your zones (drop targets)
+  bb.append(slot("you-active",P1.active,"active"), slot("you-bench",P1.bench,"bench"),
+            slot("you-deck",P1.deck,"deck"), slot("you-discard",P1.discard,"discard"));
+  $("#you-bench").style.justifyContent="flex-start"; $("#you-bench").style.padding="6px";
+  PRIZES.forEach((p,i)=> bb.append(slot("you-prize"+i,p,null)));
+  bb.append(slot("stadium",STAD,"stadium"));
+  // opponent zones (mirrored, not drop targets)
+  bb.append(slot("opp-active",mir(P1.active),null), slot("opp-bench",mir(P1.bench),null),
+            slot("opp-deck",mir(P1.deck),null), slot("opp-discard",mir(P1.discard),null));
+  $("#opp-bench").style.justifyContent="flex-start"; $("#opp-bench").style.padding="6px";
+  PRIZES.forEach((p,i)=> bb.append(slot("opp-prize"+i,mir(p),null)));
+}
+function cardEl(c, from){
+  const w=document.createElement("div"); w.className="cardwrap";
+  const img=document.createElement("img"); img.className="card"; img.src=c.url; img.title=c.name;
+  if(from){ img.draggable=true; img.addEventListener("dragstart", e=>e.dataTransfer.setData("json", JSON.stringify({card:c.id,from})));
+    img.style.cursor="grab";
+    img.addEventListener("click", ()=>{ const hp=prompt(`HP for ${c.name} (blank to clear):`, c.hp??""); if(hp!==null) update(from,c.id,{hp:hp===""?null:parseInt(hp)});});
+  }
+  w.append(img);
+  if(c.hp!=null){ const b=document.createElement("div"); b.className="hp"; b.textContent=c.hp; w.append(b);}
+  return w;
+}
+function backs(n){ return Array.from({length:n}).map(()=>{const i=document.createElement("img");i.className="card";i.src=BACK;return i;}); }
+function fill(id, cards, from){ const el=$(id); if(!el)return; el.innerHTML=""; (cards||[]).forEach(c=>el.append(cardEl(c,from))); }
+
+async function refresh(){
+  if(!token){$("#status").textContent="missing token";return;}
+  const {data,error}=await sb.rpc("game_view",{p_token:token});
+  if(error){$("#status").textContent="error: "+error.message;return;}
+  gameId=data.game_id; mySeat=data.seat;
+  $("#status").textContent=`seat ${data.seat} · v${data.version}`;
+  const you=data.you, opp=(data.opponents||[])[0]||{active:[],bench:[],discard:[],hand_count:0,deck_count:0,prizes_count:0};
+  fill("#you-active",you.active,"active"); fill("#you-bench",you.bench,"bench");
+  fill("#you-discard",you.discard?.slice(-1),"discard");
+  $("#you-deck").innerHTML=""; if(you.deck_count){$("#you-deck").append(backs(1)[0]); tag("#you-deck",you.deck_count);}
+  if(you.discard?.length) tag("#you-discard",you.discard.length);
+  PRIZES.forEach((p,i)=>{ const el=$("#you-prize"+i); el.innerHTML=""; const n=Math.min(2,Math.max(0,you.prizes_count-i*2)); backs(n).forEach(b=>el.append(b)); });
+  // opponent (public zones real; hidden as backs/counts)
+  fill("#opp-active",opp.active); fill("#opp-bench",opp.bench);
+  fill("#opp-discard",(opp.discard||[]).slice(-1)); if(opp.discard?.length) tag("#opp-discard",opp.discard.length);
+  $("#opp-deck").innerHTML=""; if(opp.deck_count){$("#opp-deck").append(backs(1)[0]); tag("#opp-deck",opp.deck_count);}
+  PRIZES.forEach((p,i)=>{ const el=$("#opp-prize"+i); el.innerHTML=""; const n=Math.min(2,Math.max(0,opp.prizes_count-i*2)); backs(n).forEach(b=>el.append(b)); });
+  fill("#stadium",data.shared?.stadium,"stadium");
+  fill("#hand",you.hand,"hand");
+  if(gameId && !subbed){ subbed=true;
+    sb.channel("g"+gameId).on("postgres_changes",{event:"INSERT",schema:"public",table:"game_events",filter:`game_id=eq.${gameId}`},
+      p=>{const d=document.createElement("div");d.textContent=p.new.text;$("#log").prepend(d);refresh();}).subscribe(); }
+}
+function tag(sel,n){ const e=document.createElement("div"); e.className="count"; e.textContent=n; $(sel).append(e); }
+async function action(a){ const {error}=await sb.rpc("game_action",{p_token:token,p_action:a}); if(error)alert(error.message); else refresh(); }
+const move=(from,to,card)=>action({type:"move",from,to,card});
+const update=(zone,card,patch)=>action({type:"update_card",zone,card,patch});
+$("#draw").onclick=()=>action({type:"draw"});
+$("#shuffle").onclick=()=>action({type:"shuffle"});
+$("#coin").onclick=()=>action({type:"coin"});
+$("#search").onclick=async()=>{ const {data,error}=await sb.rpc("game_action",{p_token:token,p_action:{type:"peek"}});
+  if(error)return alert(error.message);
+  $("#peekrow").innerHTML=""; (data.deck||[]).forEach(c=>{const i=document.createElement("img");i.src=c.url;i.title=c.name;
+    i.onclick=()=>{move("deck","hand",c.id); $("#peek").style.display="none";}; $("#peekrow").append(i);});
+  $("#peek").style.display="flex"; };
+$("#peekclose").onclick=()=>$("#peek").style.display="none";
+
+buildBoard(); refresh();
+</script>
+</body>
+</html>
