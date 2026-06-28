@@ -47,16 +47,16 @@
            background:rgba(0,0,0,.72); border-radius:11px; padding:1px 4px; color:#fff; font-size:12px; font-weight:700; line-height:1; z-index:3; }
   .hpctl button { display:none; width:16px; height:16px; padding:0; border:none; border-radius:50%; background:#e0552e; color:#fff; font-size:13px; cursor:pointer; }
   .cardwrap:hover .hpctl button { display:inline-flex; align-items:center; justify-content:center; }
-  /* attached cards (energy) peek out behind the animal, up and to the right; drag one off to detach */
+  /* attached cards (energy) peek straight up behind the animal (reverse z = each card's top band shows); drag one off to detach */
   .attached { position:absolute; inset:0; z-index:-1; }
-  .attached img { position:absolute; width:84%; border-radius:5px; box-shadow:0 1px 4px rgba(0,0,0,.55); cursor:grab; }
-  /* click the animal to fan the stack into a popover above it; drag a card off to detach */
+  .attached img { position:absolute; left:8%; width:84%; top:calc(-16% * var(--n));
+    border-radius:5px; box-shadow:0 1px 4px rgba(0,0,0,.55); cursor:grab;
+    transition:top .3s cubic-bezier(.2,.7,.3,1); }
+  /* click the animal to fan: the same cards animate straight up, spreading apart in place */
   .cardwrap.fanned { z-index:10; }
-  .cardwrap.fanned .attached { inset:auto; left:50%; bottom:104%; transform:translateX(-50%); z-index:6;
-    display:flex; flex-wrap:wrap; gap:4px; padding:6px; max-width:240px;
-    background:rgba(20,20,26,.94); border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,.55); }
-  .cardwrap.fanned .attached img { position:static; width:46px; }
-  .cardwrap.fanned .attached img:hover { outline:2px solid #ffd34d; }
+  .cardwrap.fanned .attached { z-index:5; }
+  .cardwrap.fanned .attached img { top:calc(-48% * var(--n)); }
+  .attached img:hover { outline:2px solid #ffd34d; }
   .coin { width:82px; height:82px; cursor:pointer; perspective:600px; transition:transform .35s cubic-bezier(.34,1.5,.5,1); }
   .coin.flipping { transform:translateX(-72px) scale(1.7); z-index:50; }
   .coinflip { position:relative; width:100%; height:100%; transform-style:preserve-3d; }
@@ -149,7 +149,7 @@ function cardEl(c, from){
   // click the animal to fan the stack out; drag any attached card onto a zone (e.g. discard) to detach it.
   if(c.attached && c.attached.length){ const at=document.createElement("div"); at.className="attached";
     c.attached.forEach((a,i)=>{ const ai=document.createElement("img"); ai.src=a.url; ai.title=a.name+" — drag to discard";
-      ai.style.top=`${-13*(i+1)}%`; ai.style.right=`${-7*(i+1)}%`;
+      ai.style.setProperty("--n", i+1); ai.style.zIndex=String(c.attached.length-i);  // reverse z: front card closest to animal
       if(from && amPlayer){ ai.draggable=true;
         ai.addEventListener("dragstart", e=>{ e.stopPropagation();
           e.dataTransfer.setData("json", JSON.stringify({kind:"attached", hostZone:from, host:c.id, card:a.id})); }); }
