@@ -160,9 +160,10 @@ function cardEl(c, from){
   const canDrag = from && amPlayer && (from!=="stadium" || String(c.owner)===String(mySeat));
   if(canDrag){ img.draggable=true; img.style.cursor="grab";
     img.addEventListener("dragstart", e=>e.dataTransfer.setData("json", JSON.stringify({kind:"card",card:c.id,from}))); }
-  if(from && amPlayer && c.attached && c.attached.length)
-    img.addEventListener("click", ev=>{ ev.stopPropagation(); setFan(fannedId===c.id?null:c.id, w); });
   if(from && amPlayer){
+    // click anywhere on the stack (animal OR a peeking/spread energy) to fan out / collapse
+    if(c.attached && c.attached.length)
+      w.addEventListener("click", ev=>{ ev.stopPropagation(); setFan(fannedId===c.id?null:c.id, w); });
     w.addEventListener("dragover", e=>e.preventDefault());
     w.addEventListener("drop", e=>{ e.preventDefault(); e.stopPropagation();
       const m=JSON.parse(e.dataTransfer.getData("json"));
