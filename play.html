@@ -50,13 +50,20 @@
   /* attached cards (energy) peek straight up behind the animal (reverse z = each card's top band shows); drag one off to detach */
   .attached { position:absolute; inset:0; z-index:-1; }
   .attached img { position:absolute; left:8%; width:84%; top:calc(-16% * var(--n));
-    border-radius:5px; box-shadow:0 1px 4px rgba(0,0,0,.55); cursor:grab;
-    transition:top .3s cubic-bezier(.2,.7,.3,1); }
-  /* click the animal to fan: the same cards animate straight up, spreading apart in place */
-  .cardwrap.fanned { z-index:10; }
-  .cardwrap.fanned .attached { z-index:5; }
-  .cardwrap.fanned .attached img { top:calc(-48% * var(--n)); }
+    border-radius:5px; box-shadow:0 1px 4px rgba(0,0,0,.55); cursor:grab; }
   .attached img:hover { outline:2px solid #ffd34d; }
+  .cardwrap .card { cursor:zoom-in; }
+  /* click any card to zoom it in & read; the card + its energy grow to fit the viewport */
+  #inspect { position:fixed; inset:0; background:rgba(0,0,0,.78); display:none; z-index:60;
+    align-items:center; justify-content:center; padding:18px; box-sizing:border-box; cursor:zoom-out; }
+  #inspect.show { display:flex; animation:inspectFade .18s ease; }
+  #inspectbox { display:flex; flex-direction:column; align-items:center; gap:10px; min-width:0; min-height:0; max-width:100%; max-height:100%;
+    animation:inspectGrow .26s cubic-bezier(.2,.7,.3,1); }
+  #inspectbox .main { min-height:0; max-width:90vw; border-radius:12px; box-shadow:0 10px 36px rgba(0,0,0,.6); object-fit:contain; }
+  #inspectbox .energies { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; max-width:92vw; }
+  #inspectbox .energies img { min-width:0; max-height:15vh; max-width:20vw; border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,.5); object-fit:contain; }
+  @keyframes inspectFade { from { opacity:0; } to { opacity:1; } }
+  @keyframes inspectGrow { from { transform:scale(.55); opacity:0; } to { transform:scale(1); opacity:1; } }
   .coin { width:82px; height:82px; cursor:pointer; perspective:600px; transition:transform .35s cubic-bezier(.34,1.5,.5,1); }
   .coin.flipping { transform:translateX(-72px) scale(1.7); z-index:50; }
   .coinflip { position:relative; width:100%; height:100%; transform-style:preserve-3d; }
@@ -90,6 +97,7 @@
 <div id="tray"></div>
 <div id="peek"><div id="peekbox"><h2 id="peektitle">Your deck — click a card to take it to hand</h2><div class="row" id="peekrow"></div><button id="peekclose" class="ghost" style="margin-top:10px">Close</button></div></div>
 <div id="confirm"><div id="confirmbox"><p id="confirmmsg"></p><div class="confirmbtns"><button id="confirmok">OK</button><button id="confirmcancel" class="ghost">Cancel</button></div></div></div>
+<div id="inspect"><div id="inspectbox"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
@@ -107,7 +115,7 @@ const STAD = {x:1476,y:1005};
 const mir = (z)=>({x:ZW-z.x-(z.w||CW), y:ZH-z.y-(z.h||CH), w:z.w||CW, h:z.h||CH});
 const pct = (z)=>`left:${z.x/ZW*100}%;top:${z.y/ZH*100}%;width:${(z.w||CW)/ZW*100}%;height:${(z.h||CH)/ZH*100}%`;
 
-let gameId=null, subbed=false, mySeat=null, lastView=null, amPlayer=true, fannedId=null;
+let gameId=null, subbed=false, mySeat=null, lastView=null, amPlayer=true;
 
 function slot(id, z, drop){
   const d=document.createElement("div"); d.className="zone"+(drop?" drop":""); d.id=id;
@@ -145,25 +153,23 @@ function buildBoard(){
 }
 function cardEl(c, from){
   const w=document.createElement("div"); w.className="cardwrap";
+  // click any card (yours or the opponent's) to zoom it in — with its energy — and read the text
+  w.addEventListener("click", ev=>{ ev.stopPropagation(); inspectCard(c); });
   // attached cards (energy) peek straight up behind the animal, and travel with it.
-  // click the animal to fan the stack out; drag any attached card onto a zone (e.g. discard) to detach it.
+  // drag any attached card onto a zone (e.g. discard) to detach it.
   if(c.attached && c.attached.length){ const at=document.createElement("div"); at.className="attached";
     c.attached.forEach((a,i)=>{ const ai=document.createElement("img"); ai.src=a.url; ai.title=a.name+" — drag to discard";
       ai.style.setProperty("--n", i+1); ai.style.zIndex=String(c.attached.length-i);  // reverse z: front card closest to animal
       if(from && amPlayer){ ai.draggable=true;
         ai.addEventListener("dragstart", e=>{ e.stopPropagation();
           e.dataTransfer.setData("json", JSON.stringify({kind:"attached", hostZone:from, host:c.id, card:a.id})); }); }
-      at.append(ai); }); w.append(at);
-    if(c.id===fannedId) w.classList.add("fanned"); }
+      at.append(ai); }); w.append(at); }
   const img=document.createElement("img"); img.className="card"; img.src=c.url; img.title=c.name;
   // a stadium card can only be moved by the player who owns it
   const canDrag = from && amPlayer && (from!=="stadium" || String(c.owner)===String(mySeat));
   if(canDrag){ img.draggable=true; img.style.cursor="grab";
     img.addEventListener("dragstart", e=>e.dataTransfer.setData("json", JSON.stringify({kind:"card",card:c.id,from}))); }
   if(from && amPlayer){
-    // click anywhere on the stack (animal OR a peeking/spread energy) to fan out / collapse
-    if(c.attached && c.attached.length)
-      w.addEventListener("click", ev=>{ ev.stopPropagation(); setFan(fannedId===c.id?null:c.id, w); });
     w.addEventListener("dragover", e=>e.preventDefault());
     w.addEventListener("drop", e=>{ e.preventDefault(); e.stopPropagation();
       const m=JSON.parse(e.dataTransfer.getData("json"));
@@ -249,8 +255,15 @@ const update=(zone,card,patch,silent)=>action({type:"update_card",zone,card,patc
 const attach=(from,card,zone,target)=>action({type:"attach",from,card,zone,target});  // stack `card` behind `target`
 const setHP=(zone,id,hp)=>update(zone,id,{hp},true);  // silent: syncs to opponent, no log spam
 const detach=(zone,host,att,to)=>action({type:"detach",zone,card:host,att,to});  // drag an attached card off → detaches to the drop zone
-const setFan=(id,wEl)=>{ document.querySelectorAll(".cardwrap.fanned").forEach(el=>el.classList.remove("fanned"));
-  fannedId=id; if(id&&wEl) wEl.classList.add("fanned"); };  // click an animal to fan its stack; only one open at a time
+function inspectCard(c){  // zoom a card (+ its energy) to a readable size, fit within the viewport
+  const box=$("#inspectbox"); box.innerHTML="";
+  const main=document.createElement("img"); main.className="main"; main.src=c.url; main.alt=c.name||"";
+  main.style.maxHeight = (c.attached && c.attached.length) ? "58vh" : "84vh";
+  box.append(main);
+  if(c.attached && c.attached.length){ const row=document.createElement("div"); row.className="energies";
+    c.attached.forEach(a=>{ const i=document.createElement("img"); i.src=a.url; i.alt=a.name||""; row.append(i); }); box.append(row); }
+  $("#inspect").classList.add("show");
+}
 let coinRot=0, coinBusy=false;
 async function flipCoin(){
   if(coinBusy) return; coinBusy=true;
@@ -278,6 +291,7 @@ function askConfirm(msg){ return new Promise(res=>{ $("#confirmmsg").textContent
 $("#search").onclick=async()=>{ const {data,error}=await sb.rpc("game_action",{p_token:token,p_action:{type:"peek"}});
   if(error)return alert(error.message); openSearch("Your deck — click a card to take it to hand", data.deck, "deck"); };
 $("#peekclose").onclick=()=>$("#peek").style.display="none";
+$("#inspect").addEventListener("click", ()=>$("#inspect").classList.remove("show"));  // click anywhere to dismiss the zoom
 
 const hd=$("#hand");
 hd.addEventListener("dragover", e=>{e.preventDefault(); hd.classList.add("over");});
