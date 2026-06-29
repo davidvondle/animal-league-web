@@ -78,6 +78,8 @@
   #confirmbox { background:#1f1f26; border-radius:12px; padding:20px 22px; text-align:center; max-width:300px; }
   #confirmbox p { margin:0 0 16px; font-size:15px; color:#eee; }
   .confirmbtns { display:flex; gap:10px; justify-content:center; }
+  #ended { position:fixed; top:0; left:0; right:0; display:none; justify-content:center; align-items:center; gap:8px;
+    background:#7a1f1f; color:#fff; padding:11px; z-index:55; font-weight:600; font-size:14px; text-align:center; }
 </style>
 </head>
 <body>
@@ -87,6 +89,7 @@
     <button id="draw">Draw</button>
     <button id="shuffle" class="ghost">Shuffle</button>
     <button id="search" class="ghost">Search deck</button>
+    <button id="endgame" class="ghost" style="margin-left:14px">End game</button>
   </span>
 </header>
 <div class="stage">
@@ -98,6 +101,7 @@
 <div id="peek"><div id="peekbox"><h2 id="peektitle">Your deck — click a card to take it to hand</h2><div class="row" id="peekrow"></div><button id="peekclose" class="ghost" style="margin-top:10px">Close</button></div></div>
 <div id="confirm"><div id="confirmbox"><p id="confirmmsg"></p><div class="confirmbtns"><button id="confirmok">OK</button><button id="confirmcancel" class="ghost">Cancel</button></div></div></div>
 <div id="inspect"><div id="inspectbox"></div></div>
+<div id="ended">🏁 This game has ended — start a new one from Discord with <code>/play</code>.</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
@@ -232,6 +236,9 @@ async function refresh(){
   $("#tray").style.display=amPlayer?"flex":"none"; $("#hand").style.display=amPlayer?"flex":"none";
   const _c=document.querySelector("header .controls"); if(_c) _c.style.display=amPlayer?"flex":"none";
   $("#status").textContent=`seat ${data.seat} · v${data.version}`;
+  const ended = data.status==="ended";
+  $("#ended").style.display = ended ? "flex" : "none";
+  if(ended){ $("#tray").style.display="none"; $("#hand").style.display="none"; if(_c) _c.style.display="none"; }
   const you=data.you, opp=(data.opponents||[])[0]||{active:[],bench:[],discard:[],hand_count:0,deck_count:0,prizes_count:0};
   fill("#you-active",you.active,"active"); fill("#you-bench",you.bench,"bench");
   $("#you-deck").innerHTML=""; if(you.deck_count){$("#you-deck").append(backs(1)[0]); tag("#you-deck",you.deck_count);}
@@ -279,6 +286,7 @@ async function flipCoin(){
 }
 $("#draw").onclick=()=>action({type:"draw"});
 $("#shuffle").onclick=()=>action({type:"shuffle"});
+$("#endgame").onclick=async()=>{ if(await askConfirm("End this game for everyone?")) action({type:"end"}); };
 function openSearch(title, cards, fromZone){
   $("#peektitle").textContent=title; $("#peekrow").innerHTML="";
   (cards||[]).forEach(c=>{ const i=document.createElement("img"); i.src=c.url; i.title=c.name;
