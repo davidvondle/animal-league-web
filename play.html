@@ -145,7 +145,7 @@ function buildBoard(){
 }
 function cardEl(c, from){
   const w=document.createElement("div"); w.className="cardwrap";
-  // attached cards (energy) peek out behind the animal, up and to the right, and travel with it.
+  // attached cards (energy) peek straight up behind the animal, and travel with it.
   // click the animal to fan the stack out; drag any attached card onto a zone (e.g. discard) to detach it.
   if(c.attached && c.attached.length){ const at=document.createElement("div"); at.className="attached";
     c.attached.forEach((a,i)=>{ const ai=document.createElement("img"); ai.src=a.url; ai.title=a.name+" — drag to discard";
