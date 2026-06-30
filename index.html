@@ -69,7 +69,7 @@ if (!inDiscord) {
     setStatus("authorizing…", "muted");
     const { code } = await sdk.commands.authorize({
       client_id: CLIENT_ID, response_type: "code", state: "",
-      redirect_uri: "https://animalleague.world", scope: ["identify"],
+      redirect_uri: "https://127.0.0.1", scope: ["identify"],   // RPC flow placeholder; SDK handles the real redirect
     });
     setStatus("exchanging code…", "muted");
     const r = await fetch(SB_URL + "/rest/v1/rpc/discord_token_exchange", {
