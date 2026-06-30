@@ -40,7 +40,7 @@
   <!-- shown inside a Discord Activity -->
   <div id="activity" class="hidden">
     <h1>🎴 Animal League</h1>
-    <p class="sub">Discord Activity · Phase 2 · build 5 (seating)</p>
+    <p class="sub">Discord Activity · Phase 2 · build 6 (board)</p>
     <div class="row"><b>you</b><span id="you">…</span></div>
     <div id="choose" class="hidden"></div>
     <div id="status" class="muted">Connecting to Discord…</div>
@@ -73,9 +73,10 @@ if (!inDiscord) {
   };
   const seated = (res) => {
     $("#choose").classList.add("hidden");
-    if (res.mode === "play") setStatus("✅ Seated as player " + res.seat + " — the board comes next. token ok.", "ok");
-    else if (res.mode === "spectate") setStatus("👀 Spectating this table — the board comes next. token ok.", "ok");
-    else setStatus("unexpected: " + JSON.stringify(res), "err");
+    if (res.mode === "play" || res.mode === "spectate") {
+      setStatus((res.mode === "play" ? "✅ Seated as player " + res.seat : "👀 Spectating") + " — loading the board…", "ok");
+      location.href = "/play.html#token=" + res.token;   // hand off to the (activity-aware) board
+    } else setStatus("unexpected: " + JSON.stringify(res), "err");
   };
   (async () => {
     if (!CLIENT_ID || CLIENT_ID.indexOf("__") === 0) { setStatus("⚠️ DISCORD_CLIENT_ID not substituted.", "err"); return; }

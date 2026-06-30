@@ -103,11 +103,17 @@
 <div id="inspect"><div id="inspectbox"></div></div>
 <div id="ended">🏁 This game has ended — start a new one from Discord with <code>/play</code>.</div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./vendor/supabase.js"></script>
 <script>
 const SB_URL="https://nxrzzhqywbjafrsthhll.supabase.co", SB_KEY="sb_publishable_6Op8-KnLEngJ3YQxpLNtVw_8h3ndtkk";
-const BACK = SB_URL + "/storage/v1/object/public/cards/assets/card-back.png";
-const BOARD = SB_URL + "/storage/v1/object/public/cards/assets/board-2p.svg";
+// Inside a Discord Activity the page is served from *.discordsays.com and may only
+// reach hosts Discord proxies. Route storage assets through the '/sb' URL mapping;
+// supabase-js fetch + realtime are routed via patchUrlMappings (in the bootstrap below).
+const inDiscord = location.hostname.endsWith("discordsays.com");
+const SB_BASE = inDiscord ? "/sb" : SB_URL;
+const px = u => (inDiscord && u) ? u.replace(SB_URL, "/sb") : u;   // rewrite a stored asset URL for the proxy
+const BACK = SB_BASE + "/storage/v1/object/public/cards/assets/card-back.png";
+const BOARD = SB_BASE + "/storage/v1/object/public/cards/assets/board-2p.svg";
 const token = new URLSearchParams(location.hash.slice(1)).get("token");
 const sb = supabase.createClient(SB_URL, SB_KEY);
 const $ = s => document.querySelector(s);
@@ -162,13 +168,13 @@ function cardEl(c, from){
   // attached cards (energy) peek straight up behind the animal, and travel with it.
   // drag any attached card onto a zone (e.g. discard) to detach it.
   if(c.attached && c.attached.length){ const at=document.createElement("div"); at.className="attached";
-    c.attached.forEach((a,i)=>{ const ai=document.createElement("img"); ai.src=a.url; ai.title=a.name+" — drag to discard";
+    c.attached.forEach((a,i)=>{ const ai=document.createElement("img"); ai.src=px(a.url); ai.title=a.name+" — drag to discard";
       ai.style.setProperty("--n", i+1); ai.style.zIndex=String(c.attached.length-i);  // reverse z: front card closest to animal
       if(from && amPlayer){ ai.draggable=true;
         ai.addEventListener("dragstart", e=>{ e.stopPropagation();
           e.dataTransfer.setData("json", JSON.stringify({kind:"attached", hostZone:from, host:c.id, card:a.id})); }); }
       at.append(ai); }); w.append(at); }
-  const img=document.createElement("img"); img.className="card"; img.src=c.url; img.title=c.name;
+  const img=document.createElement("img"); img.className="card"; img.src=px(c.url); img.title=c.name;
   // a stadium card can only be moved by the player who owns it
   const canDrag = from && amPlayer && (from!=="stadium" || String(c.owner)===String(mySeat));
   if(canDrag){ img.draggable=true; img.style.cursor="grab";
@@ -204,7 +210,7 @@ function cardEl(c, from){
 function backs(n){ return Array.from({length:n}).map(()=>{const i=document.createElement("img");i.className="card";i.src=BACK;return i;}); }
 function fill(id, cards, from){ const el=$(id); if(!el)return; el.innerHTML=""; (cards||[]).forEach(c=>el.append(cardEl(c,from))); }
 
-const TT=SB_URL+"/storage/v1/object/public/cards/assets/tokens/";
+const TT=SB_BASE+"/storage/v1/object/public/cards/assets/tokens/";
 const TOKENS=[
  {type:"confuse", front:TT+"confuse.svg",  back:TT+"confuse-back.svg"},
  {type:"burn",    front:TT+"burn.svg",     back:TT+"burn-back.svg"},
@@ -264,11 +270,11 @@ const setHP=(zone,id,hp)=>update(zone,id,{hp},true);  // silent: syncs to oppone
 const detach=(zone,host,att,to)=>action({type:"detach",zone,card:host,att,to});  // drag an attached card off → detaches to the drop zone
 function inspectCard(c){  // zoom a card (+ its energy) to a readable size, fit within the viewport
   const box=$("#inspectbox"); box.innerHTML="";
-  const main=document.createElement("img"); main.className="main"; main.src=c.url; main.alt=c.name||"";
+  const main=document.createElement("img"); main.className="main"; main.src=px(c.url); main.alt=c.name||"";
   main.style.maxHeight = (c.attached && c.attached.length) ? "58vh" : "84vh";
   box.append(main);
   if(c.attached && c.attached.length){ const row=document.createElement("div"); row.className="energies";
-    c.attached.forEach(a=>{ const i=document.createElement("img"); i.src=a.url; i.alt=a.name||""; row.append(i); }); box.append(row); }
+    c.attached.forEach(a=>{ const i=document.createElement("img"); i.src=px(a.url); i.alt=a.name||""; row.append(i); }); box.append(row); }
   $("#inspect").classList.add("show");
 }
 let coinRot=0, coinBusy=false;
@@ -289,7 +295,7 @@ $("#shuffle").onclick=()=>action({type:"shuffle"});
 $("#endgame").onclick=async()=>{ if(await askConfirm("End this game for everyone?")) action({type:"end"}); };
 function openSearch(title, cards, fromZone){
   $("#peektitle").textContent=title; $("#peekrow").innerHTML="";
-  (cards||[]).forEach(c=>{ const i=document.createElement("img"); i.src=c.url; i.title=c.name;
+  (cards||[]).forEach(c=>{ const i=document.createElement("img"); i.src=px(c.url); i.title=c.name;
     i.onclick=()=>{ move(fromZone,"hand",c.id); $("#peek").style.display="none"; }; $("#peekrow").append(i); });
   $("#peek").style.display="flex";
 }
@@ -308,7 +314,13 @@ hd.addEventListener("drop", e=>{e.preventDefault(); hd.classList.remove("over");
   const m=JSON.parse(e.dataTransfer.getData("json"));
   if(m.kind==="card") move(m.from,"hand",m.card);
   else if(m.kind==="attached") detach(m.hostZone, m.host, m.card, "hand");});
-buildTray(); buildBoard(); refresh();
+(async () => {
+  if (inDiscord) {   // route supabase-js fetch + realtime WebSocket through Discord's proxy
+    const m = await import("./vendor/discord-embedded-app-sdk.js");
+    m.patchUrlMappings([{ prefix: "/sb", target: SB_URL.replace(/^https?:\/\//, "") }]);
+  }
+  buildTray(); buildBoard(); refresh();
+})();
 </script>
 </body>
 </html>
