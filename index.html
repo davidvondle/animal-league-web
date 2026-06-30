@@ -15,7 +15,6 @@
   .sub { color:#9a9aa8; font-size:14px; margin:0 0 18px; line-height:1.5; }
   a.btn { display:inline-block; background:#5865F2; color:#fff; text-decoration:none; padding:10px 16px;
     border-radius:9px; font-size:14px; font-weight:600; }
-  a.alt { display:inline-block; color:#8aa; text-decoration:none; font-size:13px; margin-top:14px; }
   .row { display:flex; justify-content:space-between; gap:14px; padding:9px 0; border-bottom:1px solid #2a2a33; font-size:13px; }
   .row b { color:#9a9aa8; font-weight:500; }
   .row span { font-family:ui-monospace,SFMono-Regular,monospace; word-break:break-all; text-align:right; }
@@ -36,16 +35,19 @@
   <!-- shown inside a Discord Activity -->
   <div id="activity" class="hidden">
     <h1>🎴 Animal League</h1>
-    <p class="sub">Discord Activity · Phase 0 — pipeline check</p>
+    <p class="sub">Discord Activity · Phase 1 — identity</p>
     <div class="row"><b>channel</b><span id="channel">…</span></div>
     <div class="row"><b>guild</b><span id="guild">…</span></div>
-    <div class="row"><b>instance</b><span id="instance">…</span></div>
+    <div class="row"><b>you</b><span id="you">…</span></div>
     <div id="status" class="muted">Connecting to Discord…</div>
   </div>
 </div>
 <script type="module">
-import { DiscordSDK } from "./vendor/discord-embedded-app-sdk.js";
+import { DiscordSDK, patchUrlMappings } from "./vendor/discord-embedded-app-sdk.js";
 const CLIENT_ID = "1385860888971710494";
+const SB_URL = "https://nxrzzhqywbjafrsthhll.supabase.co";
+const SB_KEY = "sb_publishable_6Op8-KnLEngJ3YQxpLNtVw_8h3ndtkk";
+const SB_HOST = SB_URL.replace(/^https?:\/\//, "");   // host for the Discord proxy mapping (must match the portal '/sb' mapping)
 const $ = s => document.querySelector(s);
 // Discord injects ?frame_id=… when it launches the activity; a normal browser visit has none.
 const inDiscord = new URLSearchParams(location.search).has("frame_id");
@@ -55,23 +57,34 @@ if (!inDiscord) {
   $("#activity").classList.remove("hidden");
   const setStatus = (m, c) => { const el = $("#status"); el.textContent = m; el.className = c || ""; };
   const qp = new URLSearchParams(location.search);
-  // Discord passes these in the launch URL — visible immediately, before any handshake
-  $("#channel").textContent  = qp.get("channel_id")  || "(none)";
-  $("#guild").textContent    = qp.get("guild_id")    || "(none)";
-  $("#instance").textContent = qp.get("instance_id") || "(none)";
+  $("#channel").textContent = qp.get("channel_id") || "(none)";
+  $("#guild").textContent   = qp.get("guild_id")   || "(none)";
   (async () => {
     if (!CLIENT_ID || CLIENT_ID.indexOf("__") === 0) { setStatus("⚠️ DISCORD_CLIENT_ID not substituted at deploy time.", "err"); return; }
-    setStatus("client " + CLIENT_ID + " · frame " + (qp.get("frame_id") || "?") + " — handshaking…", "muted");
-    try {
-      const sdk = new DiscordSDK(CLIENT_ID);
-      const timeout = new Promise((_, rej) => setTimeout(() =>
-        rej(new Error("ready() timed out after 12s — Discord didn't ACK the handshake (often a client-id mismatch vs the launching app)")), 12000));
-      await Promise.race([sdk.ready(), timeout]);
-      setStatus("✅ Connected — the activity pipeline works.", "ok");
-    } catch (e) {
-      setStatus("❌ " + ((e && e.message) || e), "err");
-    }
-  })();
+    // route Supabase calls through Discord's proxy (must match the portal '/sb' URL mapping)
+    patchUrlMappings([{ prefix: "/sb", target: SB_HOST }]);
+    const sdk = new DiscordSDK(CLIENT_ID);
+    setStatus("handshaking…", "muted");
+    await sdk.ready();
+    setStatus("authorizing…", "muted");
+    const { code } = await sdk.commands.authorize({
+      client_id: CLIENT_ID, response_type: "code", state: "", scope: ["identify"],
+    });
+    setStatus("exchanging code…", "muted");
+    const r = await fetch(SB_URL + "/rest/v1/rpc/discord_token_exchange", {
+      method: "POST",
+      headers: { "apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_code: code }),
+    });
+    const tok = await r.json().catch(() => ({}));
+    if (!r.ok || !tok.access_token) throw new Error("token exchange failed (" + r.status + "): " + JSON.stringify(tok));
+    setStatus("authenticating…", "muted");
+    const auth = await sdk.commands.authenticate({ access_token: tok.access_token });
+    const u = auth && auth.user;
+    const name = u ? (u.global_name || u.username) : "?";
+    $("#you").textContent = u ? (name + " · " + u.id) : "?";
+    setStatus("✅ Signed in as " + name + " — identity works! Next (Phase 2): seat you into the game + the board.", "ok");
+  })().catch(e => setStatus("❌ " + ((e && e.message) || e), "err"));
 }
 </script>
 </body>
