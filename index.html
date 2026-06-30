@@ -54,16 +54,20 @@ if (!inDiscord) {
 } else {
   $("#activity").classList.remove("hidden");
   const setStatus = (m, c) => { const el = $("#status"); el.textContent = m; el.className = c || ""; };
+  const qp = new URLSearchParams(location.search);
+  // Discord passes these in the launch URL — visible immediately, before any handshake
+  $("#channel").textContent  = qp.get("channel_id")  || "(none)";
+  $("#guild").textContent    = qp.get("guild_id")    || "(none)";
+  $("#instance").textContent = qp.get("instance_id") || "(none)";
   (async () => {
     if (!CLIENT_ID || CLIENT_ID.indexOf("__") === 0) { setStatus("⚠️ DISCORD_CLIENT_ID not substituted at deploy time.", "err"); return; }
+    setStatus("client " + CLIENT_ID + " · frame " + (qp.get("frame_id") || "?") + " — handshaking…", "muted");
     try {
       const sdk = new DiscordSDK(CLIENT_ID);
-      setStatus("Handshaking with Discord…", "muted");
-      await sdk.ready();
-      $("#channel").textContent  = sdk.channelId  || "(none)";
-      $("#guild").textContent    = sdk.guildId    || "(none)";
-      $("#instance").textContent = sdk.instanceId || "(none)";
-      setStatus("✅ Connected — the activity pipeline works. Next: identity + the board.", "ok");
+      const timeout = new Promise((_, rej) => setTimeout(() =>
+        rej(new Error("ready() timed out after 12s — Discord didn't ACK the handshake (often a client-id mismatch vs the launching app)")), 12000));
+      await Promise.race([sdk.ready(), timeout]);
+      setStatus("✅ Connected — the activity pipeline works.", "ok");
     } catch (e) {
       setStatus("❌ " + ((e && e.message) || e), "err");
     }
