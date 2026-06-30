@@ -35,7 +35,7 @@
   <!-- shown inside a Discord Activity -->
   <div id="activity" class="hidden">
     <h1>🎴 Animal League</h1>
-    <p class="sub">Discord Activity · Phase 1 · build 2 (redirect 127.0.0.1)</p>
+    <p class="sub">Discord Activity · Phase 1 · build 3 (no explicit redirect)</p>
     <div class="row"><b>channel</b><span id="channel">…</span></div>
     <div class="row"><b>guild</b><span id="guild">…</span></div>
     <div class="row"><b>you</b><span id="you">…</span></div>
@@ -67,9 +67,11 @@ if (!inDiscord) {
     setStatus("handshaking…", "muted");
     await sdk.ready();
     setStatus("authorizing…", "muted");
+    // No redirect_uri here on purpose: the RPC flow rejects an explicit one
+    // ("cannot be used in the RPC OAuth2 flow"). The SDK uses the redirect
+    // registered in the portal (https://127.0.0.1) and handles it internally.
     const { code } = await sdk.commands.authorize({
-      client_id: CLIENT_ID, response_type: "code", state: "",
-      redirect_uri: "https://127.0.0.1", scope: ["identify"],   // RPC flow placeholder; SDK handles the real redirect
+      client_id: CLIENT_ID, response_type: "code", state: "", scope: ["identify"],
     });
     setStatus("exchanging code…", "muted");
     const r = await fetch(SB_URL + "/rest/v1/rpc/discord_token_exchange", {
