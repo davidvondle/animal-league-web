@@ -21,6 +21,11 @@
   #status { margin-top:18px; font-size:13px; line-height:1.5; }
   .ok { color:#5fd08a; } .err { color:#ff9b7a; } .muted { color:#9a9aa8; }
   .hidden { display:none; }
+  #choose { display:flex; flex-direction:column; gap:8px; margin-top:14px; }
+  #choose button { text-align:left; background:#2e7d46; color:#fff; border:none; border-radius:9px;
+    padding:11px 14px; font-size:14px; font-weight:600; cursor:pointer; }
+  #choose button.ghost { background:#2a2a33; }
+  #choose button:hover { filter:brightness(1.1); }
 </style>
 </head>
 <body>
@@ -35,10 +40,9 @@
   <!-- shown inside a Discord Activity -->
   <div id="activity" class="hidden">
     <h1>🎴 Animal League</h1>
-    <p class="sub">Discord Activity · Phase 1 · build 4 (cache test)</p>
-    <div class="row"><b>channel</b><span id="channel">…</span></div>
-    <div class="row"><b>guild</b><span id="guild">…</span></div>
+    <p class="sub">Discord Activity · Phase 2 · build 5 (seating)</p>
     <div class="row"><b>you</b><span id="you">…</span></div>
+    <div id="choose" class="hidden"></div>
     <div id="status" class="muted">Connecting to Discord…</div>
   </div>
 </div>
@@ -47,46 +51,78 @@ import { DiscordSDK, patchUrlMappings } from "./vendor/discord-embedded-app-sdk.
 const CLIENT_ID = "1385860888971710494";
 const SB_URL = "https://nxrzzhqywbjafrsthhll.supabase.co";
 const SB_KEY = "sb_publishable_6Op8-KnLEngJ3YQxpLNtVw_8h3ndtkk";
-const SB_HOST = SB_URL.replace(/^https?:\/\//, "");   // host for the Discord proxy mapping (must match the portal '/sb' mapping)
+const SB_HOST = SB_URL.replace(/^https?:\/\//, "");
 const $ = s => document.querySelector(s);
-// Discord injects ?frame_id=… when it launches the activity; a normal browser visit has none.
 const inDiscord = new URLSearchParams(location.search).has("frame_id");
+
 if (!inDiscord) {
   $("#landing").classList.remove("hidden");
 } else {
   $("#activity").classList.remove("hidden");
   const setStatus = (m, c) => { const el = $("#status"); el.textContent = m; el.className = c || ""; };
-  const qp = new URLSearchParams(location.search);
-  $("#channel").textContent = qp.get("channel_id") || "(none)";
-  $("#guild").textContent   = qp.get("guild_id")   || "(none)";
+  // call a Supabase RPC through Discord's proxy (patchUrlMappings rewrites the supabase host)
+  const rpc = async (name, args) => {
+    const r = await fetch(SB_URL + "/rest/v1/rpc/" + name, {
+      method: "POST",
+      headers: { "apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    });
+    const data = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(name + " failed (" + r.status + "): " + JSON.stringify(data));
+    return data;
+  };
+  const seated = (res) => {
+    $("#choose").classList.add("hidden");
+    if (res.mode === "play") setStatus("✅ Seated as player " + res.seat + " — the board comes next. token ok.", "ok");
+    else if (res.mode === "spectate") setStatus("👀 Spectating this table — the board comes next. token ok.", "ok");
+    else setStatus("unexpected: " + JSON.stringify(res), "err");
+  };
   (async () => {
-    if (!CLIENT_ID || CLIENT_ID.indexOf("__") === 0) { setStatus("⚠️ DISCORD_CLIENT_ID not substituted at deploy time.", "err"); return; }
-    // route Supabase calls through Discord's proxy (must match the portal '/sb' URL mapping)
+    if (!CLIENT_ID || CLIENT_ID.indexOf("__") === 0) { setStatus("⚠️ DISCORD_CLIENT_ID not substituted.", "err"); return; }
     patchUrlMappings([{ prefix: "/sb", target: SB_HOST }]);
     const sdk = new DiscordSDK(CLIENT_ID);
     setStatus("handshaking…", "muted");
     await sdk.ready();
-    setStatus("authorizing…", "muted");
-    // No redirect_uri here on purpose: the RPC flow rejects an explicit one
-    // ("cannot be used in the RPC OAuth2 flow"). The SDK uses the redirect
-    // registered in the portal (https://127.0.0.1) and handles it internally.
+    setStatus("signing in…", "muted");
     const { code } = await sdk.commands.authorize({
       client_id: CLIENT_ID, response_type: "code", state: "", scope: ["identify"],
     });
-    setStatus("exchanging code…", "muted");
-    const r = await fetch(SB_URL + "/rest/v1/rpc/discord_token_exchange", {
-      method: "POST",
-      headers: { "apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({ p_code: code }),
-    });
-    const tok = await r.json().catch(() => ({}));
-    if (!r.ok || !tok.access_token) throw new Error("token exchange failed (" + r.status + "): " + JSON.stringify(tok));
-    setStatus("authenticating…", "muted");
+    const tok = await rpc("discord_token_exchange", { p_code: code });
+    if (!tok || !tok.access_token) throw new Error("token exchange returned no access_token");
     const auth = await sdk.commands.authenticate({ access_token: tok.access_token });
     const u = auth && auth.user;
-    const name = u ? (u.global_name || u.username) : "?";
-    $("#you").textContent = u ? (name + " · " + u.id) : "?";
-    setStatus("✅ Signed in as " + name + " — identity works! Next (Phase 2): seat you into the game + the board.", "ok");
+    const me = u && u.id, ch = sdk.channelId;
+    $("#you").textContent = u ? ((u.global_name || u.username) + " · " + me) : "?";
+    if (!ch) throw new Error("no channel id from the SDK");
+
+    setStatus("checking the table…", "muted");
+    let res = await rpc("activity_enter", { p_uid: me, p_channel: ch });
+    if (res.mode !== "choose") { seated(res); return; }
+
+    // there's room: let them pick a deck (play) or spectate
+    setStatus(res.has_game ? "Pick a deck to play, or spectate:" : "Pick a deck to start the table:", "muted");
+    const decks = await rpc("my_decks", { p_uid: me });
+    const box = $("#choose"); box.innerHTML = ""; box.classList.remove("hidden");
+    const pick = (args, label) => async () => {
+      box.innerHTML = ""; setStatus(label + "…", "muted");
+      try { seated(await rpc("activity_enter", Object.assign({ p_uid: me, p_channel: ch }, args))); }
+      catch (e) { setStatus("❌ " + e.message, "err"); }
+    };
+    (decks || []).forEach(d => {
+      const b = document.createElement("button"); b.textContent = "▶  " + d.name;
+      b.onclick = pick({ p_deck_id: d.id }, "seating you");
+      box.append(b);
+    });
+    if (!(decks || []).length) {
+      const p = document.createElement("div"); p.className = "muted";
+      p.textContent = "No saved decks yet — build one with /deckbuilder, then relaunch.";
+      box.append(p);
+    }
+    if (res.has_game) {
+      const s = document.createElement("button"); s.className = "ghost"; s.textContent = "👀  Spectate";
+      s.onclick = pick({ p_spectate: true }, "joining as spectator");
+      box.append(s);
+    }
   })().catch(e => setStatus("❌ " + ((e && e.message) || e), "err"));
 }
 </script>
