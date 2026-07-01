@@ -154,6 +154,7 @@ const pct = (z)=>`left:${z.x/ZW*100}%;top:${z.y/ZH*100}%;width:${(z.w||CW)/ZW*10
 
 let gameId=null, subbed=false, mySeat=null, lastView=null, amPlayer=true;
 let chipDrag=null;   // the token being dragged; cleared if it lands as a reposition, else removed on dragend
+let hpHover=false, hpPending=false;   // while an HP popup is hovered, defer board rebuilds so it isn't destroyed
 
 function slot(id, z, drop){
   const d=document.createElement("div"); d.className="zone"+(drop?" drop":""); d.id=id;
@@ -228,6 +229,8 @@ function cardEl(c, from){
       const bump=(d)=>{ c.hp=Math.max(0,(c.hp||0)+d); badge.textContent=c.hp; v.textContent=c.hp; actionQuiet({type:"update_card",zone:from,card:c.id,patch:{hp:c.hp},silent:true}); };
       const mn=document.createElement("button"); mn.textContent="−"; mn.addEventListener("click", ev=>{ ev.stopPropagation(); bump(-10); });
       const pl=document.createElement("button"); pl.textContent="+"; pl.addEventListener("click", ev=>{ ev.stopPropagation(); bump(10); });
+      pop.addEventListener("mouseenter", ()=>hpHover=true);
+      pop.addEventListener("mouseleave", ()=>{ hpHover=false; if(hpPending){ hpPending=false; refresh(); } });
       pop.append(mn, v, pl); w.append(pop);
     }
   }
@@ -281,6 +284,7 @@ async function pumpLog(initial){   // realtime feeds this in-browser; in Discord
 }
 async function refresh(){
   if(!token){$("#status").textContent="missing token";return;}
+  if(hpHover){ hpPending=true; return; }   // don't rebuild the card whose HP popup is open; reconcile on mouseleave
   const {data,error}=await sb.rpc("game_view",{p_token:token});
   if(error){$("#status").textContent="error: "+error.message;return;}
   gameId=data.game_id; mySeat=data.seat; lastView=data; amPlayer=(data.kind!=="spectator");
