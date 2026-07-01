@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Animal League — Play</title>
 <style>
   :root { --slot:#646464; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:-apple-system,"Segoe UI",Roboto,sans-serif; background:#1b1b1f; color:#eee; }
-  header { display:flex; align-items:center; gap:10px; padding:8px 14px; background:#111; }
+  header { display:flex; align-items:center; gap:10px; padding:8px 14px; padding-top:max(8px, env(safe-area-inset-top)); background:#111; }
   header b { font-size:15px; } #status { color:#9a9aa8; font-size:13px; }
   .controls { margin-left:auto; display:flex; gap:6px; }
   button { padding:7px 11px; background:#e0552e; color:#fff; border:none; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; }
@@ -26,6 +26,12 @@
         font-weight:700; min-width:20px; height:20px; border-radius:10px; display:flex; align-items:center; justify-content:center; padding:0 4px; }
   .count { position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,.7); color:#fff; font-size:12px;
            border-radius:8px; padding:0 6px; }
+  .drawbtn { position:absolute; inset:0; background:#e0552e; color:#fff; border:none; border-radius:6px;
+             font-size:12px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; }
+  .deckicon { position:absolute; width:20px; height:20px; border-radius:50%; border:none; background:rgba(0,0,0,.72);
+              color:#fff; font-size:10px; line-height:1; padding:0; cursor:pointer; z-index:3;
+              display:flex; align-items:center; justify-content:center; }
+  .deckicon.sh { top:-8px; left:-8px; } .deckicon.se { top:-8px; right:-8px; }
   #hand { display:flex; gap:6px; width:min(74vh,94vw); height:150px; background:#15151a; border-radius:10px; padding:8px;
           align-items:center; overflow-x:auto; }
   #hand .card { height:130px; max-width:none; cursor:grab; }
@@ -86,10 +92,7 @@
 <header>
   <b>Animal League</b> <span id="status">loading…</span>
   <span class="controls">
-    <button id="draw">Draw</button>
-    <button id="shuffle" class="ghost">Shuffle</button>
-    <button id="search" class="ghost">Search deck</button>
-    <button id="restart" class="ghost" style="margin-left:14px">Restart</button>
+    <button id="restart" class="ghost">Restart</button>
     <button id="leave" class="ghost">Leave seat</button>
     <button id="endgame" class="ghost">End game</button>
   </span>
@@ -151,12 +154,6 @@ function buildBoard(){
   $("#you-bench").style.justifyContent="flex-start"; $("#you-bench").style.padding="6px";
   PRIZES.forEach((p,i)=> bb.append(slot("you-prize"+i,p,null)));
   bb.append(slot("stadium",STAD,"stadium"));
-  // click your (face-down) discard to search it and take a card back to hand
-  $("#you-discard").style.cursor="pointer";
-  $("#you-discard").addEventListener("click", async ()=>{
-    if(!lastView?.you?.discard?.length) return;
-    if(await askConfirm("Search discard pile?")) openSearch("Discard pile — click a card to take it to hand", lastView.you.discard, "discard");
-  });
   // opponent zones (mirrored, not drop targets)
   bb.append(slot("opp-active",mir(P1.active),null), slot("opp-bench",mir(P1.bench),null),
             slot("opp-deck",mir(P1.deck),null), slot("opp-discard",mir(P1.discard),null));
@@ -249,8 +246,21 @@ async function refresh(){
   if(ended){ $("#tray").style.display="none"; $("#hand").style.display="none"; if(_c) _c.style.display="none"; }
   const you=data.you, opp=(data.opponents||[])[0]||{active:[],bench:[],discard:[],hand_count:0,deck_count:0,prizes_count:0};
   fill("#you-active",you.active,"active"); fill("#you-bench",you.bench,"bench");
-  $("#you-deck").innerHTML=""; if(you.deck_count){$("#you-deck").append(backs(1)[0]); tag("#you-deck",you.deck_count);}
-  $("#you-discard").innerHTML=""; if(you.discard?.length){ $("#you-discard").append(backs(1)[0]); tag("#you-discard",you.discard.length); }  // face-down; click to search
+  const dk=$("#you-deck"); dk.innerHTML="";
+  if(you.deck_count){
+    if(amPlayer){
+      const d=document.createElement("button"); d.className="drawbtn"; d.textContent="Draw"; d.onclick=()=>action({type:"draw"}); dk.append(d);
+      const sh=document.createElement("button"); sh.className="deckicon sh"; sh.textContent="🔀"; sh.title="Shuffle deck"; sh.onclick=()=>action({type:"shuffle"}); dk.append(sh);
+      const se=document.createElement("button"); se.className="deckicon se"; se.textContent="🔍"; se.title="Search deck"; se.onclick=searchDeck; dk.append(se);
+    } else { dk.append(backs(1)[0]); }
+    tag("#you-deck", you.deck_count);
+  }
+  const dc=$("#you-discard"); dc.innerHTML="";
+  if(you.discard?.length){
+    dc.append(cardEl(you.discard[you.discard.length-1], amPlayer?"discard":null));  // face-up top card
+    if(amPlayer){ const se=document.createElement("button"); se.className="deckicon se"; se.textContent="🔍"; se.title="Search discard"; se.onclick=searchDiscard; dc.append(se); }
+    tag("#you-discard", you.discard.length);
+  }
   PRIZES.forEach((p,i)=>{ const el=$("#you-prize"+i); el.innerHTML=""; const n=Math.min(2,Math.max(0,you.prizes_count-i*2)); if(n){el.append(backs(1)[0]); tag("#you-prize"+i,n);} });
   // opponent (public zones real; hidden as backs/counts)
   fill("#opp-active",opp.active); fill("#opp-bench",opp.bench);
@@ -292,8 +302,6 @@ async function flipCoin(){
   flip.style.transform=`rotateY(${coinRot}deg)`;
   setTimeout(()=>{ coin.classList.remove("flipping"); refresh(); coinBusy=false; }, 1200);
 }
-$("#draw").onclick=()=>action({type:"draw"});
-$("#shuffle").onclick=()=>action({type:"shuffle"});
 $("#endgame").onclick=async()=>{ if(await askConfirm("End this game for everyone?")) action({type:"end"}); };
 $("#restart").onclick=async()=>{ if(await askConfirm("Restart the match? Everyone gets a fresh deal.")) action({type:"restart"}); };
 $("#leave").onclick=async()=>{
@@ -312,8 +320,9 @@ function openSearch(title, cards, fromZone){
 function askConfirm(msg){ return new Promise(res=>{ $("#confirmmsg").textContent=msg; $("#confirm").style.display="flex";
   $("#confirmok").onclick=()=>{ $("#confirm").style.display="none"; res(true); };
   $("#confirmcancel").onclick=()=>{ $("#confirm").style.display="none"; res(false); }; }); }
-$("#search").onclick=async()=>{ const {data,error}=await sb.rpc("game_action",{p_token:token,p_action:{type:"peek"}});
-  if(error)return alert(error.message); openSearch("Your deck — click a card to take it to hand", data.deck, "deck"); };
+async function searchDeck(){ const {data,error}=await sb.rpc("game_action",{p_token:token,p_action:{type:"peek"}});
+  if(error)return alert(error.message); openSearch("Your deck — click a card to take it to hand", data.deck, "deck"); }
+function searchDiscard(){ if(lastView?.you?.discard?.length) openSearch("Discard pile — click a card to take it to hand", lastView.you.discard, "discard"); }
 $("#peekclose").onclick=()=>$("#peek").style.display="none";
 $("#inspect").addEventListener("click", ()=>$("#inspect").classList.remove("show"));  // click anywhere to dismiss the zoom
 
