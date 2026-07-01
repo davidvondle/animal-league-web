@@ -58,7 +58,9 @@
   .hppop { position:absolute; bottom:100%; left:50%; transform:translateX(-50%); margin-bottom:6px; display:none;
            align-items:center; gap:10px; background:rgba(20,20,26,.95); border-radius:10px; padding:5px 9px; z-index:6;
            box-shadow:0 3px 12px rgba(0,0,0,.5); color:#fff; font-weight:700; white-space:nowrap; }
-  .cardwrap:hover .hppop { display:flex; }
+  /* transparent buffer around the popup so the pointer can travel card→popup without a dead gap */
+  .hppop::after { content:""; position:absolute; left:-10px; right:-10px; top:-8px; bottom:-14px; z-index:-1; }
+  .cardwrap:hover .hppop, .hppop:hover { display:flex; }
   .hppop button { width:30px; height:30px; padding:0; border:none; border-radius:50%; background:#e0552e; color:#fff;
                   font-size:18px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; }
   /* attached cards (energy) peek straight up behind the animal (reverse z = each card's top band shows); drag one off to detach */
@@ -151,6 +153,7 @@ const mir = (z)=>({x:ZW-z.x-(z.w||CW), y:ZH-z.y-(z.h||CH), w:z.w||CW, h:z.h||CH}
 const pct = (z)=>`left:${z.x/ZW*100}%;top:${z.y/ZH*100}%;width:${(z.w||CW)/ZW*100}%;height:${(z.h||CH)/ZH*100}%`;
 
 let gameId=null, subbed=false, mySeat=null, lastView=null, amPlayer=true;
+let chipDrag=null;   // the token being dragged; cleared if it lands as a reposition, else removed on dragend
 
 function slot(id, z, drop){
   const d=document.createElement("div"); d.className="zone"+(drop?" drop":""); d.id=id;
@@ -168,9 +171,7 @@ function slot(id, z, drop){
 }
 function buildBoard(){
   const bb=$("#boardbox"); bb.style.backgroundImage=`url(${BOARD})`; bb.innerHTML="";
-  bb.ondragover = e=>e.preventDefault();
-  bb.ondrop = e=>{ e.preventDefault(); let m; try{ m=JSON.parse(e.dataTransfer.getData("json")); }catch(_){ return; }
-    if(m && m.kind==="chip") removeToken(m.zone, m.card, m.idx); };   // drag a token off its card onto the board → remove
+  bb.ondragover = e=>e.preventDefault();   // let the board accept a dropped token (removal happens on dragend)
   // your zones (drop targets)
   bb.append(slot("you-active",P1.active,"active"), slot("you-bench",P1.bench,"bench"),
             slot("you-deck",P1.deck,"deck"), slot("you-discard",P1.discard,"discard"));
@@ -212,8 +213,8 @@ function cardEl(c, from){
         if(m.card===c.id){ const r=w.getBoundingClientRect();   // same card → reposition
           let corner=((e.clientY-r.top)<r.height/2?"t":"b")+((e.clientX-r.left)<r.width/2?"l":"r");
           if(corner==="tr") corner="tl";   // top-right is reserved for HP
-          setTokenCorner(from,c.id,m.idx,corner);
-        } else removeToken(m.zone,m.card,m.idx); }   // dropped on a different card → remove
+          setTokenCorner(from,c.id,m.idx,corner); chipDrag=null;   // repositioned → don't remove on dragend
+        } }   // dropped on any other card → dragend removes it
       else if(m.kind==="card" && m.card!==c.id) attach(m.from,m.card,from,c.id); });  // drop a card ONTO a card → stack behind it
   }
   w.append(img);
@@ -232,7 +233,9 @@ function cardEl(c, from){
     c.tokens.forEach((t,idx)=>{ const ty=t.type||t; let corner=(t&&t.corner)||corners[idx%3]; if(corner==="tr") corner="tl";
       const ci=document.createElement("img"); ci.className="chip "+corner; ci.src=TOKMAP[ty]||""; ci.title=ty+" — click, or drag off the card, to remove";
       if(from && amPlayer){ ci.draggable=true;
-        ci.addEventListener("dragstart", e=>{ e.stopPropagation(); e.dataTransfer.setData("json", JSON.stringify({kind:"chip",idx,zone:from,card:c.id})); });
+        ci.addEventListener("dragstart", e=>{ e.stopPropagation(); chipDrag={zone:from,card:c.id,idx}; e.dataTransfer.setData("json", JSON.stringify({kind:"chip",idx,zone:from,card:c.id})); });
+        // dropped anywhere but back onto its own card (which cancels chipDrag) → remove it
+        ci.addEventListener("dragend", ()=>{ if(chipDrag){ removeToken(chipDrag.zone,chipDrag.card,chipDrag.idx); chipDrag=null; } });
         ci.addEventListener("click", ev=>{ ev.stopPropagation(); removeToken(from,c.id,idx); }); }
       w.append(ci); }); }
   return w;
@@ -390,8 +393,7 @@ hd.addEventListener("dragleave", ()=>hd.classList.remove("over"));
 hd.addEventListener("drop", e=>{e.preventDefault(); hd.classList.remove("over");
   const m=JSON.parse(e.dataTransfer.getData("json"));
   if(m.kind==="card") move(m.from,"hand",m.card);
-  else if(m.kind==="attached") detach(m.hostZone, m.host, m.card, "hand");
-  else if(m.kind==="chip") removeToken(m.zone, m.card, m.idx);});
+  else if(m.kind==="attached") detach(m.hostZone, m.host, m.card, "hand");});   // a dropped token is removed on dragend
 (async () => {
   // iOS Discord webview doesn't pass safe-area insets into the iframe, so the header
   // hides under the Dynamic Island — push it down with a fixed inset there.
