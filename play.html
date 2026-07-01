@@ -405,7 +405,7 @@ $("#logtoggle").onclick=()=>{ const c=$("#logpanel").classList.toggle("collapsed
 // re-rasterizes the card art at the larger size → text stays crisp, and the fixed-px overlays
 // (HP badge, chips, deck icons) keep a constant on-screen size instead of ballooning.
 (function(){
-  const view=$("#boardview"), bb=$("#boardbox"), MIN=1, MAX=4;
+  const view=$("#boardview"), bb=$("#boardbox"), MIN=1, MAX=7;
   let scale=1, tx=0, ty=0, raf=0;
   const draw=()=>{ const w=view.clientWidth, h=view.clientHeight;
     bb.style.width=(w*scale)+"px"; bb.style.height=(h*scale)+"px"; bb.style.left=tx+"px"; bb.style.top=ty+"px"; };
