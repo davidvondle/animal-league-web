@@ -14,8 +14,11 @@
   button { padding:7px 11px; background:#e0552e; color:#fff; border:none; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; }
   button.ghost { background:#2a2a33; }
   .stage { display:flex; flex-direction:column; align-items:center; gap:8px; padding:10px; }
-  #boardbox { position:relative; height:min(70vh,92vw); aspect-ratio:2366/2233;
-              background:center/contain no-repeat; border-radius:14px; flex:none; }
+  /* boardview = fixed clipped viewport; boardbox is the zoom/pan target inside it */
+  #boardview { position:relative; height:min(70vh,92vw); aspect-ratio:2366/2233; flex:none;
+               overflow:hidden; border-radius:14px; touch-action:none; }
+  #boardbox { position:absolute; inset:0; background:center/contain no-repeat;
+              transform-origin:0 0; will-change:transform; }
   .zone { position:absolute; display:flex; gap:3px; align-items:center; justify-content:center; }
   .zone.drop { outline:2px dashed transparent; border-radius:8px; }
   .zone.drop.over { outline-color:#ffd34d; background:rgba(255,211,77,.12); }
@@ -120,7 +123,7 @@
   </span>
 </header>
 <div class="stage">
-  <div id="boardbox"></div>
+  <div id="boardview"><div id="boardbox"></div></div>
   <div id="hand" class="hand" data-zone="hand"></div>
   <div id="tray"></div>
 </div>
@@ -394,6 +397,51 @@ async function searchDeck(){ const {data,error}=await sb.rpc("game_action",{p_to
 function searchDiscard(){ if(lastView?.you?.discard?.length) openSearch("Discard pile — click a card to take it to hand", lastView.you.discard, "discard"); }
 $("#peekclose").onclick=()=>$("#peek").style.display="none";
 $("#logtoggle").onclick=()=>{ const c=$("#logpanel").classList.toggle("collapsed"); $("#logtoggle").textContent=(c?"▸":"▾")+" Game log"; };
+
+// ---- board zoom/pan — transforms only #boardbox (board + its cards); hand/tray/log/header stay put ----
+(function(){
+  const view=$("#boardview"), bb=$("#boardbox"), MIN=1, MAX=4;
+  let scale=1, tx=0, ty=0;
+  const apply=()=>{ bb.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`; };
+  const clamp=()=>{ scale=Math.max(MIN,Math.min(MAX,scale));
+    const w=view.clientWidth, h=view.clientHeight;   // origin 0,0 → content spans w*scale
+    tx=Math.min(0,Math.max(w-w*scale,tx)); ty=Math.min(0,Math.max(h-h*scale,ty)); };
+  const local=(cx,cy)=>{ const r=view.getBoundingClientRect(); return [cx-r.left,cy-r.top]; };
+  const onCard=t=>t.closest(".cardwrap")||t.closest("button");
+
+  // desktop: wheel / trackpad-pinch zooms toward the pointer
+  view.addEventListener("wheel", e=>{ e.preventDefault(); const [x,y]=local(e.clientX,e.clientY);
+    const ns=Math.max(MIN,Math.min(MAX,scale*(e.deltaY<0?1.12:1/1.12)));
+    tx=x-(x-tx)*(ns/scale); ty=y-(y-ty)*(ns/scale); scale=ns; clamp(); apply(); }, {passive:false});
+
+  // desktop: drag empty board to pan (cards keep their native drag)
+  let panning=false,lx=0,ly=0;
+  view.addEventListener("mousedown", e=>{ if(scale<=MIN||onCard(e.target)||e.target.tagName==="IMG") return;
+    panning=true; lx=e.clientX; ly=e.clientY; e.preventDefault(); });
+  window.addEventListener("mousemove", e=>{ if(!panning) return; tx+=e.clientX-lx; ty+=e.clientY-ly; lx=e.clientX; ly=e.clientY; clamp(); apply(); });
+  window.addEventListener("mouseup", ()=>panning=false);
+  view.addEventListener("dblclick", ()=>{ scale=1; tx=0; ty=0; apply(); });   // reset
+
+  // touch: two-finger pinch (zoom about the midpoint + follow it); one-finger pan when zoomed & off-card
+  let mode=null, sd=0, cpx=0, cpy=0, ssc=1, psx=0, psy=0, ptx=0, pty=0;
+  const dist=t=>Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
+  const mid=t=>[(t[0].clientX+t[1].clientX)/2,(t[0].clientY+t[1].clientY)/2];
+  view.addEventListener("touchstart", e=>{
+    if(e.touches.length===2){ e.preventDefault(); mode="pinch"; sd=dist(e.touches); ssc=scale;
+      const [ax,ay]=local(...mid(e.touches)); cpx=(ax-tx)/scale; cpy=(ay-ty)/scale; }
+    else if(e.touches.length===1 && scale>MIN && !onCard(e.target)){ e.preventDefault();
+      mode="pan"; psx=e.touches[0].clientX; psy=e.touches[0].clientY; ptx=tx; pty=ty; }
+    else mode=null;
+  }, {passive:false});
+  view.addEventListener("touchmove", e=>{
+    if(mode==="pinch" && e.touches.length===2){ e.preventDefault();
+      scale=Math.max(MIN,Math.min(MAX,ssc*(dist(e.touches)/sd)));
+      const [lx2,ly2]=local(...mid(e.touches)); tx=lx2-cpx*scale; ty=ly2-cpy*scale; clamp(); apply(); }
+    else if(mode==="pan" && e.touches.length===1){ e.preventDefault();
+      tx=ptx+(e.touches[0].clientX-psx); ty=pty+(e.touches[0].clientY-psy); clamp(); apply(); }
+  }, {passive:false});
+  view.addEventListener("touchend", e=>{ if(e.touches.length<1) mode=null; else if(mode==="pinch") mode=null; });
+})();
 $("#inspect").addEventListener("click", ()=>$("#inspect").classList.remove("show"));  // click anywhere to dismiss the zoom
 
 const hd=$("#hand");
