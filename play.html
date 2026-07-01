@@ -26,8 +26,9 @@
         font-weight:700; min-width:20px; height:20px; border-radius:10px; display:flex; align-items:center; justify-content:center; padding:0 4px; }
   .count { position:absolute; bottom:2px; right:2px; background:rgba(0,0,0,.7); color:#fff; font-size:12px;
            border-radius:8px; padding:0 6px; }
-  .drawbtn { position:absolute; inset:0; background:#e0552e; color:#fff; border:none; border-radius:6px;
-             font-size:12px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; }
+  .drawbtn { position:absolute; inset:0; background:rgba(224,85,46,.5); color:#fff; border:none; border-radius:6px;
+             font-size:12px; font-weight:700; text-shadow:0 1px 2px rgba(0,0,0,.6); cursor:pointer;
+             display:flex; align-items:center; justify-content:center; padding:0; }
   .deckicon { position:absolute; width:20px; height:20px; border-radius:50%; border:none; background:rgba(0,0,0,.72);
               color:#fff; font-size:10px; line-height:1; padding:0; cursor:pointer; z-index:3;
               display:flex; align-items:center; justify-content:center; }
@@ -38,6 +39,8 @@
   #hand.over { outline:2px dashed #ffd34d; }
   h2 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#9a9aa8; margin:0 0 6px; }
   #logpanel { position:fixed; right:10px; bottom:10px; width:220px; background:rgba(21,21,26,.94); border-radius:10px; padding:8px 10px; z-index:30; }
+  #logtoggle { cursor:pointer; user-select:none; }
+  #logpanel.collapsed { width:auto; } #logpanel.collapsed #log { display:none; }
   #log { font-size:12px; color:#cdd8d8; max-height:34vh; overflow:auto; }
   #tray { position:fixed; right:14px; top:58px; display:flex; flex-direction:column; gap:14px; z-index:25; }
   .token { width:54px; height:54px; cursor:pointer; transform-origin:100% 50%; transition:transform .42s cubic-bezier(.34,1.56,.5,1); }
@@ -101,7 +104,7 @@
   <div id="boardbox"></div>
   <div id="hand" class="hand" data-zone="hand"></div>
 </div>
-<div id="logpanel"><h2>Game log</h2><div id="log"></div></div>
+<div id="logpanel"><h2 id="logtoggle">▾ Game log</h2><div id="log"></div></div>
 <div id="tray"></div>
 <div id="peek"><div id="peekbox"><h2 id="peektitle">Your deck — click a card to take it to hand</h2><div class="row" id="peekrow"></div><button id="peekclose" class="ghost" style="margin-top:10px">Close</button></div></div>
 <div id="confirm"><div id="confirmbox"><p id="confirmmsg"></p><div class="confirmbtns"><button id="confirmok">OK</button><button id="confirmcancel" class="ghost">Cancel</button></div></div></div>
@@ -153,6 +156,8 @@ function buildBoard(){
             slot("you-deck",P1.deck,"deck"), slot("you-discard",P1.discard,"discard"));
   $("#you-bench").style.justifyContent="flex-start"; $("#you-bench").style.padding="6px";
   PRIZES.forEach((p,i)=> bb.append(slot("you-prize"+i,p,null)));
+  PRIZES.forEach((p,i)=>{ const el=$("#you-prize"+i); el.style.cursor="pointer"; el.title="Take a prize card into your hand";
+    el.addEventListener("click", async ()=>{ if(amPlayer && lastView?.you?.prizes_count>0 && await askConfirm("Take a prize card into your hand?")) action({type:"take_prize"}); }); });
   bb.append(slot("stadium",STAD,"stadium"));
   // opponent zones (mirrored, not drop targets)
   bb.append(slot("opp-active",mir(P1.active),null), slot("opp-bench",mir(P1.bench),null),
@@ -233,6 +238,16 @@ const addToken=(zone,id,type)=>{ const cur=cardTokens(zone,id); update(zone,id,{
 const removeToken=(zone,id,idx)=>{ const t=[...cardTokens(zone,id)]; t.splice(idx,1); update(zone,id,{tokens:t}); };
 const setTokenCorner=(zone,id,idx,corner)=>{ const arr=cardTokens(zone,id).map(x=>typeof x==="string"?{type:x}:{...x}); if(!arr[idx])return; arr[idx].corner=corner; update(zone,id,{tokens:arr},true); };
 
+let lastLogId = 0;
+function logEvent(ev){ if(!ev || !ev.text || ev.id <= lastLogId) return; lastLogId = ev.id;
+  const d=document.createElement("div"); d.textContent=ev.text; $("#log").prepend(d); }
+async function pumpLog(initial){   // realtime feeds this in-browser; in Discord (dead WS) the poll drives it
+  if(!gameId) return;
+  let q = sb.from("game_events").select("id,text").eq("game_id", gameId);
+  q = initial ? q.order("id",{ascending:false}).limit(30) : q.gt("id", lastLogId).order("id",{ascending:true});
+  const { data } = await q;
+  if(data) (initial ? data.slice().reverse() : data).forEach(logEvent);   // oldest-first so newest ends on top
+}
 async function refresh(){
   if(!token){$("#status").textContent="missing token";return;}
   const {data,error}=await sb.rpc("game_view",{p_token:token});
@@ -248,6 +263,7 @@ async function refresh(){
   fill("#you-active",you.active,"active"); fill("#you-bench",you.bench,"bench");
   const dk=$("#you-deck"); dk.innerHTML="";
   if(you.deck_count){
+    dk.append(backs(1)[0]);   // card-back shows through the semi-transparent Draw button
     if(amPlayer){
       const d=document.createElement("button"); d.className="drawbtn"; d.textContent="Draw"; d.onclick=()=>action({type:"draw"}); dk.append(d);
       const sh=document.createElement("button"); sh.className="deckicon sh"; sh.textContent="🔀"; sh.title="Shuffle deck"; sh.onclick=()=>action({type:"shuffle"}); dk.append(sh);
@@ -271,7 +287,9 @@ async function refresh(){
   fill("#hand",you.hand,"hand");
   if(gameId && !subbed){ subbed=true;
     sb.channel("g"+gameId).on("postgres_changes",{event:"INSERT",schema:"public",table:"game_events",filter:`game_id=eq.${gameId}`},
-      p=>{ if(p.new.text){ const d=document.createElement("div"); d.textContent=p.new.text; $("#log").prepend(d); } refresh(); }).subscribe(); }
+      p=>{ logEvent(p.new); refresh(); }).subscribe();
+    pumpLog(true);   // initial fill; also the only log source in Discord, where realtime is silent
+  }
 }
 function tag(sel,n){ const e=document.createElement("div"); e.className="count"; e.textContent=n; $(sel).append(e); }
 async function action(a){ const {error}=await sb.rpc("game_action",{p_token:token,p_action:a}); if(error)alert(error.message); else refresh(); }
@@ -324,6 +342,7 @@ async function searchDeck(){ const {data,error}=await sb.rpc("game_action",{p_to
   if(error)return alert(error.message); openSearch("Your deck — click a card to take it to hand", data.deck, "deck"); }
 function searchDiscard(){ if(lastView?.you?.discard?.length) openSearch("Discard pile — click a card to take it to hand", lastView.you.discard, "discard"); }
 $("#peekclose").onclick=()=>$("#peek").style.display="none";
+$("#logtoggle").onclick=()=>{ const c=$("#logpanel").classList.toggle("collapsed"); $("#logtoggle").textContent=(c?"▸":"▾")+" Game log"; };
 $("#inspect").addEventListener("click", ()=>$("#inspect").classList.remove("show"));  // click anywhere to dismiss the zoom
 
 const hd=$("#hand");
@@ -346,6 +365,7 @@ hd.addEventListener("drop", e=>{e.preventDefault(); hd.classList.remove("over");
       try {
         const { data } = await sb.rpc("game_view", { p_token: token });
         if (data && lastView && data.version !== lastView.version) refresh();
+        pumpLog(false);   // pull new log events (realtime WS doesn't traverse the proxy)
       } catch (e) {}
     }, 2500);
   }
