@@ -53,10 +53,14 @@
   .tback { transform:rotateX(180deg); }
   .chip { position:absolute; width:24px; height:24px; cursor:grab; filter:drop-shadow(0 1px 2px rgba(0,0,0,.7)); }
   .chip.tl{top:3px;left:3px;} .chip.tr{top:3px;right:3px;} .chip.bl{bottom:3px;left:3px;} .chip.br{bottom:3px;right:3px;}
-  .hpctl { position:absolute; top:3px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:3px;
-           background:rgba(0,0,0,.72); border-radius:11px; padding:1px 4px; color:#fff; font-size:12px; font-weight:700; line-height:1; z-index:3; }
-  .hpctl button { display:none; width:16px; height:16px; padding:0; border:none; border-radius:50%; background:#e0552e; color:#fff; font-size:13px; cursor:pointer; }
-  .cardwrap:hover .hpctl button { display:inline-flex; align-items:center; justify-content:center; }
+  .hpbadge { position:absolute; top:2px; right:2px; background:#e0552e; color:#fff; font-size:12px; font-weight:700;
+             min-width:22px; height:20px; border-radius:10px; display:flex; align-items:center; justify-content:center; padding:0 5px; z-index:4; }
+  .hppop { position:absolute; bottom:100%; left:50%; transform:translateX(-50%); margin-bottom:6px; display:none;
+           align-items:center; gap:10px; background:rgba(20,20,26,.95); border-radius:10px; padding:5px 9px; z-index:6;
+           box-shadow:0 3px 12px rgba(0,0,0,.5); color:#fff; font-weight:700; white-space:nowrap; }
+  .cardwrap:hover .hppop { display:flex; }
+  .hppop button { width:30px; height:30px; padding:0; border:none; border-radius:50%; background:#e0552e; color:#fff;
+                  font-size:18px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; }
   /* attached cards (energy) peek straight up behind the animal (reverse z = each card's top band shows); drag one off to detach */
   .attached { position:absolute; inset:0; z-index:-1; }
   .attached img { position:absolute; left:8%; width:84%; top:calc(-16% * var(--n));
@@ -72,6 +76,10 @@
   #inspectbox .main { min-height:0; max-width:90vw; border-radius:12px; box-shadow:0 10px 36px rgba(0,0,0,.6); object-fit:contain; }
   #inspectbox .energies { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; max-width:92vw; }
   #inspectbox .energies img { min-width:0; max-height:15vh; max-width:20vw; border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,.5); object-fit:contain; }
+  #inspectbox .hprow { display:flex; align-items:center; gap:18px; color:#fff; font-size:22px; font-weight:700; }
+  #inspectbox .hprow button { width:46px; height:46px; padding:0; border:none; border-radius:50%; background:#e0552e; color:#fff; font-size:26px; line-height:1; cursor:pointer; }
+  #inspectbox .tokens { display:flex; gap:12px; }
+  #inspectbox .tokens img { width:40px; height:40px; }
   @keyframes inspectFade { from { opacity:0; } to { opacity:1; } }
   @keyframes inspectGrow { from { transform:scale(.55); opacity:0; } to { transform:scale(1); opacity:1; } }
   .coin { width:54px; height:54px; flex:none; cursor:pointer; perspective:600px; transition:transform .35s cubic-bezier(.34,1.5,.5,1); }
@@ -160,6 +168,9 @@ function slot(id, z, drop){
 }
 function buildBoard(){
   const bb=$("#boardbox"); bb.style.backgroundImage=`url(${BOARD})`; bb.innerHTML="";
+  bb.ondragover = e=>e.preventDefault();
+  bb.ondrop = e=>{ e.preventDefault(); let m; try{ m=JSON.parse(e.dataTransfer.getData("json")); }catch(_){ return; }
+    if(m && m.kind==="chip") removeToken(m.zone, m.card, m.idx); };   // drag a token off its card onto the board → remove
   // your zones (drop targets)
   bb.append(slot("you-active",P1.active,"active"), slot("you-bench",P1.bench,"bench"),
             slot("you-deck",P1.deck,"deck"), slot("you-discard",P1.discard,"discard"));
@@ -177,7 +188,7 @@ function buildBoard(){
 function cardEl(c, from){
   const w=document.createElement("div"); w.className="cardwrap";
   // click any card (yours or the opponent's) to zoom it in — with its energy — and read the text
-  w.addEventListener("click", ev=>{ ev.stopPropagation(); inspectCard(c); });
+  w.addEventListener("click", ev=>{ ev.stopPropagation(); inspectCard(c, from); });
   // attached cards (energy) peek straight up behind the animal, and travel with it.
   // drag any attached card onto a zone (e.g. discard) to detach it.
   if(c.attached && c.attached.length){ const at=document.createElement("div"); at.className="attached";
@@ -197,25 +208,31 @@ function cardEl(c, from){
     w.addEventListener("drop", e=>{ e.preventDefault(); e.stopPropagation();
       const m=JSON.parse(e.dataTransfer.getData("json"));
       if(m.kind==="token") addToken(from,c.id,m.type);
-      else if(m.kind==="chip"){ const r=w.getBoundingClientRect();
-        const corner=((e.clientY-r.top)<r.height/2?"t":"b")+((e.clientX-r.left)<r.width/2?"l":"r");
-        setTokenCorner(from,c.id,m.idx,corner); }
+      else if(m.kind==="chip"){
+        if(m.card===c.id){ const r=w.getBoundingClientRect();   // same card → reposition
+          let corner=((e.clientY-r.top)<r.height/2?"t":"b")+((e.clientX-r.left)<r.width/2?"l":"r");
+          if(corner==="tr") corner="tl";   // top-right is reserved for HP
+          setTokenCorner(from,c.id,m.idx,corner);
+        } else removeToken(m.zone,m.card,m.idx); }   // dropped on a different card → remove
       else if(m.kind==="card" && m.card!==c.id) attach(m.from,m.card,from,c.id); });  // drop a card ONTO a card → stack behind it
   }
   w.append(img);
-  // HP counter (animals carry one): value always shown; hover reveals −/+ (step 10) on your own cards
-  if(c.hp!=null){ const hc=document.createElement("div"); hc.className="hpctl";
-    if(from && amPlayer){ const mn=document.createElement("button"); mn.textContent="−";
-      mn.addEventListener("click", ev=>{ ev.stopPropagation(); setHP(from,c.id,Math.max(0,(c.hp||0)-10)); }); hc.append(mn); }
-    const v=document.createElement("span"); v.className="hpval"; v.textContent=c.hp; hc.append(v);
-    if(from && amPlayer){ const pl=document.createElement("button"); pl.textContent="+";
-      pl.addEventListener("click", ev=>{ ev.stopPropagation(); setHP(from,c.id,(c.hp||0)+10); }); hc.append(pl); }
-    w.append(hc); }
-  if(c.tokens&&c.tokens.length){ const corners=["tl","tr","bl","br"];
-    c.tokens.forEach((t,idx)=>{ const ty=t.type||t, corner=(t&&t.corner)||corners[idx%4];
-      const ci=document.createElement("img"); ci.className="chip "+corner; ci.src=TOKMAP[ty]||""; ci.title=ty;
+  // HP: value badge pinned to the top-right corner; hover shows a larger −/+ control floating ABOVE the card
+  if(c.hp!=null){
+    const badge=document.createElement("div"); badge.className="hpbadge"; badge.textContent=c.hp; w.append(badge);
+    if(from && amPlayer){
+      const pop=document.createElement("div"); pop.className="hppop";
+      const mn=document.createElement("button"); mn.textContent="−"; mn.addEventListener("click", ev=>{ ev.stopPropagation(); setHP(from,c.id,Math.max(0,(c.hp||0)-10)); });
+      const v=document.createElement("span"); v.textContent=c.hp;
+      const pl=document.createElement("button"); pl.textContent="+"; pl.addEventListener("click", ev=>{ ev.stopPropagation(); setHP(from,c.id,(c.hp||0)+10); });
+      pop.append(mn, v, pl); w.append(pop);
+    }
+  }
+  if(c.tokens&&c.tokens.length){ const corners=["tl","bl","br"];   // top-right reserved for HP
+    c.tokens.forEach((t,idx)=>{ const ty=t.type||t; let corner=(t&&t.corner)||corners[idx%3]; if(corner==="tr") corner="tl";
+      const ci=document.createElement("img"); ci.className="chip "+corner; ci.src=TOKMAP[ty]||""; ci.title=ty+" — click, or drag off the card, to remove";
       if(from && amPlayer){ ci.draggable=true;
-        ci.addEventListener("dragstart", e=>{ e.stopPropagation(); e.dataTransfer.setData("json", JSON.stringify({kind:"chip",idx})); });
+        ci.addEventListener("dragstart", e=>{ e.stopPropagation(); e.dataTransfer.setData("json", JSON.stringify({kind:"chip",idx,zone:from,card:c.id})); });
         ci.addEventListener("click", ev=>{ ev.stopPropagation(); removeToken(from,c.id,idx); }); }
       w.append(ci); }); }
   return w;
@@ -243,7 +260,7 @@ function buildTray(){ const tray=$("#tray"); tray.innerHTML="";
     tray.append(el); });
 }
 const cardTokens=(zone,id)=>{ const src = zone==="stadium" ? (lastView&&lastView.shared&&lastView.shared.stadium) : (lastView&&lastView.you&&lastView.you[zone]); const c=(src||[]).find(x=>x.id===id); return (c&&c.tokens)||[]; };
-const addToken=(zone,id,type)=>{ const cur=cardTokens(zone,id); update(zone,id,{tokens:[...cur,{type,corner:["tl","tr","bl","br"][cur.length%4]}]}); };
+const addToken=(zone,id,type)=>{ const cur=cardTokens(zone,id); update(zone,id,{tokens:[...cur,{type,corner:["tl","bl","br"][cur.length%3]}]}); };
 const removeToken=(zone,id,idx)=>{ const t=[...cardTokens(zone,id)]; t.splice(idx,1); update(zone,id,{tokens:t}); };
 const setTokenCorner=(zone,id,idx,corner)=>{ const arr=cardTokens(zone,id).map(x=>typeof x==="string"?{type:x}:{...x}); if(!arr[idx])return; arr[idx].corner=corner; update(zone,id,{tokens:arr},true); };
 
@@ -307,12 +324,25 @@ const update=(zone,card,patch,silent)=>action({type:"update_card",zone,card,patc
 const attach=(from,card,zone,target)=>action({type:"attach",from,card,zone,target});  // stack `card` behind `target`
 const setHP=(zone,id,hp)=>update(zone,id,{hp},true);  // silent: syncs to opponent, no log spam
 const detach=(zone,host,att,to)=>action({type:"detach",zone,card:host,att,to});  // drag an attached card off → detaches to the drop zone
-function inspectCard(c){  // zoom a card (+ its energy) to a readable size, fit within the viewport
+function inspectCard(c, from){  // zoom a card + its HP/tokens/energy; big HP controls (the mobile-friendly way to manage HP)
   const box=$("#inspectbox"); box.innerHTML="";
+  const hasEnergy = c.attached && c.attached.length;
   const main=document.createElement("img"); main.className="main"; main.src=px(c.url); main.alt=c.name||"";
-  main.style.maxHeight = (c.attached && c.attached.length) ? "58vh" : "84vh";
+  main.style.maxHeight = hasEnergy ? "54vh" : "78vh";
   box.append(main);
-  if(c.attached && c.attached.length){ const row=document.createElement("div"); row.className="energies";
+  if(c.hp!=null){
+    const row=document.createElement("div"); row.className="hprow";
+    const v=document.createElement("span"); const setv=()=>v.textContent="HP "+c.hp;
+    if(from && amPlayer){ const mn=document.createElement("button"); mn.textContent="−";
+      mn.onclick=ev=>{ ev.stopPropagation(); c.hp=Math.max(0,(c.hp||0)-10); setv(); setHP(from,c.id,c.hp); }; row.append(mn); }
+    setv(); row.append(v);
+    if(from && amPlayer){ const pl=document.createElement("button"); pl.textContent="+";
+      pl.onclick=ev=>{ ev.stopPropagation(); c.hp=(c.hp||0)+10; setv(); setHP(from,c.id,c.hp); }; row.append(pl); }
+    box.append(row);
+  }
+  if(c.tokens && c.tokens.length){ const t=document.createElement("div"); t.className="tokens";
+    c.tokens.forEach(tk=>{ const ty=tk.type||tk; const i=document.createElement("img"); i.src=TOKMAP[ty]||""; i.title=ty; t.append(i); }); box.append(t); }
+  if(hasEnergy){ const row=document.createElement("div"); row.className="energies";
     c.attached.forEach(a=>{ const i=document.createElement("img"); i.src=px(a.url); i.alt=a.name||""; row.append(i); }); box.append(row); }
   $("#inspect").classList.add("show");
 }
@@ -360,7 +390,8 @@ hd.addEventListener("dragleave", ()=>hd.classList.remove("over"));
 hd.addEventListener("drop", e=>{e.preventDefault(); hd.classList.remove("over");
   const m=JSON.parse(e.dataTransfer.getData("json"));
   if(m.kind==="card") move(m.from,"hand",m.card);
-  else if(m.kind==="attached") detach(m.hostZone, m.host, m.card, "hand");});
+  else if(m.kind==="attached") detach(m.hostZone, m.host, m.card, "hand");
+  else if(m.kind==="chip") removeToken(m.zone, m.card, m.idx);});
 (async () => {
   // iOS Discord webview doesn't pass safe-area insets into the iframe, so the header
   // hides under the Dynamic Island — push it down with a fixed inset there.
