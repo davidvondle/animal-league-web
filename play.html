@@ -17,8 +17,8 @@
   /* boardview = fixed clipped viewport; boardbox is the zoom/pan target inside it */
   #boardview { position:relative; height:min(70vh,92vw); aspect-ratio:2366/2233; flex:none;
                overflow:hidden; border-radius:14px; touch-action:none; }
-  #boardbox { position:absolute; inset:0; background:center/contain no-repeat;
-              transform-origin:0 0; will-change:transform; }
+  #boardbox { position:absolute; left:0; top:0; width:100%; height:100%;
+              background:center/contain no-repeat; }
   .zone { position:absolute; display:flex; gap:3px; align-items:center; justify-content:center; }
   .zone.drop { outline:2px dashed transparent; border-radius:8px; }
   .zone.drop.over { outline-color:#ffd34d; background:rgba(255,211,77,.12); }
@@ -66,6 +66,8 @@
   .cardwrap:hover .hppop, .hppop:hover { display:flex; }
   .hppop button { width:30px; height:30px; padding:0; border:none; border-radius:50%; background:#e0552e; color:#fff;
                   font-size:18px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  /* lift a hovered card (and its HP popup) above neighbours like the prize-card stack */
+  .cardwrap:hover { z-index:50; }
   /* attached cards (energy) peek straight up behind the animal (reverse z = each card's top band shows); drag one off to detach */
   .attached { position:absolute; inset:0; z-index:-1; }
   .attached img { position:absolute; left:8%; width:84%; top:calc(-16% * var(--n));
@@ -398,21 +400,29 @@ function searchDiscard(){ if(lastView?.you?.discard?.length) openSearch("Discard
 $("#peekclose").onclick=()=>$("#peek").style.display="none";
 $("#logtoggle").onclick=()=>{ const c=$("#logpanel").classList.toggle("collapsed"); $("#logtoggle").textContent=(c?"▸":"▾")+" Game log"; };
 
-// ---- board zoom/pan — transforms only #boardbox (board + its cards); hand/tray/log/header stay put ----
+// ---- board zoom/pan — resizes only #boardbox (board + its cards); hand/tray/log/header stay put ----
+// Zoom is a LAYOUT change (grow boardbox's real pixel size), not a CSS transform, so the browser
+// re-rasterizes the card art at the larger size → text stays crisp, and the fixed-px overlays
+// (HP badge, chips, deck icons) keep a constant on-screen size instead of ballooning.
 (function(){
   const view=$("#boardview"), bb=$("#boardbox"), MIN=1, MAX=4;
-  let scale=1, tx=0, ty=0;
-  const apply=()=>{ bb.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`; };
+  let scale=1, tx=0, ty=0, raf=0;
+  const draw=()=>{ const w=view.clientWidth, h=view.clientHeight;
+    bb.style.width=(w*scale)+"px"; bb.style.height=(h*scale)+"px"; bb.style.left=tx+"px"; bb.style.top=ty+"px"; };
+  const apply=()=>{ if(!raf) raf=requestAnimationFrame(()=>{ raf=0; draw(); }); };   // coalesce reflows
   const clamp=()=>{ scale=Math.max(MIN,Math.min(MAX,scale));
     const w=view.clientWidth, h=view.clientHeight;   // origin 0,0 → content spans w*scale
     tx=Math.min(0,Math.max(w-w*scale,tx)); ty=Math.min(0,Math.max(h-h*scale,ty)); };
   const local=(cx,cy)=>{ const r=view.getBoundingClientRect(); return [cx-r.left,cy-r.top]; };
   const onCard=t=>t.closest(".cardwrap")||t.closest("button");
 
-  // desktop: wheel / trackpad-pinch zooms toward the pointer
-  view.addEventListener("wheel", e=>{ e.preventDefault(); const [x,y]=local(e.clientX,e.clientY);
-    const ns=Math.max(MIN,Math.min(MAX,scale*(e.deltaY<0?1.12:1/1.12)));
-    tx=x-(x-tx)*(ns/scale); ty=y-(y-ty)*(ns/scale); scale=ns; clamp(); apply(); }, {passive:false});
+  // trackpad: pinch arrives as a ctrl+wheel → zoom toward the pointer; a two-finger swipe → pan
+  view.addEventListener("wheel", e=>{ e.preventDefault();
+    if(e.ctrlKey){ const [x,y]=local(e.clientX,e.clientY);
+      const ns=Math.max(MIN,Math.min(MAX,scale*(e.deltaY<0?1.08:1/1.08)));
+      tx=x-(x-tx)*(ns/scale); ty=y-(y-ty)*(ns/scale); scale=ns; }
+    else { tx-=e.deltaX; ty-=e.deltaY; }   // two-finger scroll pans
+    clamp(); apply(); }, {passive:false});
 
   // desktop: drag empty board to pan (cards keep their native drag)
   let panning=false,lx=0,ly=0;
