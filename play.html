@@ -18,8 +18,10 @@
   /* boardview = fixed clipped viewport; boardbox is the zoom/pan target inside it */
   #boardview { position:relative; height:min(70vh,92vw); aspect-ratio:2366/2233; flex:none;
                overflow:hidden; border-radius:14px; touch-action:none; }
-  #boardbox { position:absolute; left:0; top:0; width:100%; height:100%;
-              background:center/contain no-repeat; }
+  #boardbox { position:absolute; left:0; top:0; width:100%; height:100%; }
+  /* boardrot carries the board art + zones; for 3p it's rotated so the player's seat faces them.
+     2p: fills the box, no rotation. 3p styling is applied inline in buildBoard3. */
+  #boardrot { position:absolute; inset:0; background:center/contain no-repeat; }
   .zone { position:absolute; display:flex; gap:3px; align-items:center; justify-content:center; }
   .zone.drop { outline:2px dashed transparent; border-radius:8px; }
   .zone.drop.over { outline-color:#ffd34d; background:rgba(255,211,77,.12); }
@@ -130,7 +132,7 @@
   </span>
 </header>
 <div class="stage">
-  <div id="boardview"><div id="boardbox"></div></div>
+  <div id="boardview"><div id="boardbox"><div id="boardrot"></div></div></div>
   <div id="hand" class="hand" data-zone="hand"></div>
   <div id="tray"></div>
 </div>
@@ -162,40 +164,102 @@ const STAD = {x:1476,y:1005};
 const mir = (z)=>({x:ZW-z.x-(z.w||CW), y:ZH-z.y-(z.h||CH), w:z.w||CW, h:z.h||CH});
 const pct = (z)=>`left:${z.x/ZW*100}%;top:${z.y/ZH*100}%;width:${(z.w||CW)/ZW*100}%;height:${(z.h||CH)/ZH*100}%`;
 
-let gameId=null, subbed=false, mySeat=null, lastView=null, amPlayer=true;
+// ── 3-player board (board-3p.svg, 3513×3148) ─────────────────────────────────
+// Three seats 120° apart; each seat's zones are drawn rotated to face that seat.
+// Coords are fractions of the board; rot = the seat's card angle in the board frame.
+// We rotate the whole board by -(my seat's angle) so my seat sits upright at the bottom.
+const BOARD3 = SB_BASE + "/storage/v1/object/public/cards/assets/board-3p.svg";
+const STAD3 = {z:"stadium",cx:0.5139,cy:0.4841,w:0.0470,h:0.0756,rot:0};
+const SEAT3 = [
+  [ {z:"active",cx:0.3273,cy:0.6091,w:0.0470,h:0.0756,rot:60},
+    {z:"bench",cx:0.1984,cy:0.6921,w:0.3612,h:0.0845,rot:60},
+    {z:"deck",cx:0.3971,cy:0.8608,w:0.0470,h:0.0756,rot:60},
+    {z:"discard",cx:0.4629,cy:0.8184,w:0.0470,h:0.0756,rot:60},
+    {z:"prize0",cx:0.2324,cy:0.3665,w:0.0470,h:0.0756,rot:60},
+    {z:"prize1",cx:0.1577,cy:0.4146,w:0.0470,h:0.0756,rot:60},
+    {z:"prize2",cx:0.0830,cy:0.4628,w:0.0470,h:0.0756,rot:60} ],
+  [ {z:"active",cx:0.5139,cy:0.2494,w:0.0470,h:0.0756,rot:180},
+    {z:"bench",cx:0.5139,cy:0.0832,w:0.3612,h:0.0845,rot:180},
+    {z:"deck",cx:0.2839,cy:0.1909,w:0.0470,h:0.0756,rot:180},
+    {z:"discard",cx:0.2839,cy:0.2757,w:0.0470,h:0.0756,rot:180},
+    {z:"prize0",cx:0.7499,cy:0.2789,w:0.0470,h:0.0756,rot:180},
+    {z:"prize1",cx:0.7499,cy:0.1827,w:0.0470,h:0.0756,rot:180},
+    {z:"prize2",cx:0.7499,cy:0.0864,w:0.0470,h:0.0756,rot:180} ],
+  [ {z:"active",cx:0.7009,cy:0.6063,w:0.0470,h:0.0756,rot:300},
+    {z:"bench",cx:0.8298,cy:0.6894,w:0.3612,h:0.0845,rot:300},
+    {z:"deck",cx:0.8612,cy:0.4133,w:0.0470,h:0.0756,rot:300},
+    {z:"discard",cx:0.7954,cy:0.3708,w:0.0470,h:0.0756,rot:300},
+    {z:"prize0",cx:0.5600,cy:0.8196,w:0.0470,h:0.0756,rot:300},
+    {z:"prize1",cx:0.6346,cy:0.8677,w:0.0470,h:0.0756,rot:300},
+    {z:"prize2",cx:0.7093,cy:0.9158,w:0.0470,h:0.0756,rot:300} ],
+];
+const px3 = z => `left:${z.cx*100}%;top:${z.cy*100}%;width:${z.w*100}%;height:${z.h*100}%;transform:translate(-50%,-50%) rotate(${z.rot}deg)`;
+
+let gameId=null, subbed=false, mySeat=null, lastView=null, amPlayer=true, builtMode=null;
 let chipDrag=null;   // the token being dragged; cleared if it lands as a reposition, else removed on dragend
 let hpHover=false, hpPending=false;   // while an HP popup is hovered, defer board rebuilds so it isn't destroyed
 
+function wireDrop(d, drop){
+  d.addEventListener("dragover", e=>{e.preventDefault(); d.classList.add("over");});
+  d.addEventListener("dragleave", ()=>d.classList.remove("over"));
+  d.addEventListener("drop", e=>{e.preventDefault(); d.classList.remove("over");
+    const m=JSON.parse(e.dataTransfer.getData("json"));
+    if(m.kind==="card") move(m.from, drop, m.card);
+    else if(m.kind==="attached") detach(m.hostZone, m.host, m.card, drop);});
+}
 function slot(id, z, drop){
   const d=document.createElement("div"); d.className="zone"+(drop?" drop":""); d.id=id;
-  if(drop) d.dataset.zone = drop;
+  if(drop){ d.dataset.zone = drop; }
   d.style.cssText = pct(z);
-  if(drop){
-    d.addEventListener("dragover", e=>{e.preventDefault(); d.classList.add("over");});
-    d.addEventListener("dragleave", ()=>d.classList.remove("over"));
-    d.addEventListener("drop", e=>{e.preventDefault(); d.classList.remove("over");
-      const m=JSON.parse(e.dataTransfer.getData("json"));
-      if(m.kind==="card") move(m.from, drop, m.card);
-      else if(m.kind==="attached") detach(m.hostZone, m.host, m.card, drop);});
-  }
+  if(drop) wireDrop(d, drop);
   return d;
 }
+// 3p slot: positioned by center + per-seat rotation (px3)
+function slot3(id, z, drop){
+  const d=document.createElement("div"); d.className="zone"+(drop?" drop":""); d.id=id;
+  if(drop){ d.dataset.zone = drop; }
+  d.style.cssText = px3(z);
+  if(drop) wireDrop(d, drop);
+  return d;
+}
+function prizeClick(el){ el.style.cursor="pointer"; el.title="Take a prize card into your hand";
+  el.addEventListener("click", async ()=>{ if(amPlayer && lastView?.you?.prizes_count>0 && await askConfirm("Take a prize card into your hand?")) action({type:"take_prize"}); }); }
+
 function buildBoard(){
-  const bb=$("#boardbox"); bb.style.backgroundImage=`url(${BOARD})`; bb.innerHTML="";
-  bb.ondragover = e=>e.preventDefault();   // let the board accept a dropped token (removal happens on dragend)
-  // your zones (drop targets)
-  bb.append(slot("you-active",P1.active,"active"), slot("you-bench",P1.bench,"bench"),
+  const bb=$("#boardbox"); bb.ondragover = e=>e.preventDefault();   // accept dropped tokens (removal on dragend)
+  const br=$("#boardrot"); br.innerHTML="";
+  if((lastView?.table_size||2)===3){ buildBoard3(br); return; }
+  // ── 2-player ──
+  $("#boardview").style.aspectRatio=""; br.style.cssText=""; br.style.backgroundImage=`url(${BOARD})`;
+  br.append(slot("you-active",P1.active,"active"), slot("you-bench",P1.bench,"bench"),
             slot("you-deck",P1.deck,"deck"), slot("you-discard",P1.discard,"discard"));
   $("#you-bench").style.justifyContent="flex-start"; $("#you-bench").style.padding="6px";
-  PRIZES.forEach((p,i)=> bb.append(slot("you-prize"+i,p,null)));
-  PRIZES.forEach((p,i)=>{ const el=$("#you-prize"+i); el.style.cursor="pointer"; el.title="Take a prize card into your hand";
-    el.addEventListener("click", async ()=>{ if(amPlayer && lastView?.you?.prizes_count>0 && await askConfirm("Take a prize card into your hand?")) action({type:"take_prize"}); }); });
-  bb.append(slot("stadium",STAD,"stadium"));
-  // opponent zones (mirrored, not drop targets)
-  bb.append(slot("opp-active",mir(P1.active),null), slot("opp-bench",mir(P1.bench),null),
+  PRIZES.forEach((p,i)=> br.append(slot("you-prize"+i,p,null)));
+  PRIZES.forEach((p,i)=> prizeClick($("#you-prize"+i)));
+  br.append(slot("stadium",STAD,"stadium"));
+  br.append(slot("opp-active",mir(P1.active),null), slot("opp-bench",mir(P1.bench),null),
             slot("opp-deck",mir(P1.deck),null), slot("opp-discard",mir(P1.discard),null));
   $("#opp-bench").style.justifyContent="flex-start"; $("#opp-bench").style.padding="6px";
-  PRIZES.forEach((p,i)=> bb.append(slot("opp-prize"+i,mir(p),null)));
+  PRIZES.forEach((p,i)=> br.append(slot("opp-prize"+i,mir(p),null)));
+}
+// ── 3-player: place all 3 seats; rotate the board so MY seat is upright at the bottom ──
+function buildBoard3(br){
+  const pm=(mySeat-1)%3, thetaMe=SEAT3[pm][0].rot;
+  $("#boardview").style.aspectRatio="1 / 1";   // square viewport so the rotated board isn't clipped
+  br.style.cssText=`position:absolute;left:50%;top:50%;width:74%;aspect-ratio:3513/3148;`+
+    `background:center/contain no-repeat;transform:translate(-50%,-50%) rotate(${-thetaMe}deg);`;
+  br.style.backgroundImage=`url(${BOARD3})`;
+  br.append(slot3("stadium", STAD3, amPlayer?"stadium":null));
+  for(let p=0;p<3;p++){
+    const mine=(p===pm), pre=mine?"you":"opp"+p;
+    SEAT3[p].forEach(z=>{
+      const isDrop = mine && amPlayer && ["active","bench","deck","discard"].includes(z.z);
+      const d = slot3(pre+"-"+z.z, z, isDrop?z.z:null);
+      if(z.z==="bench"){ d.style.justifyContent="flex-start"; d.style.padding="4px"; }
+      br.append(d);
+      if(mine && z.z.startsWith("prize")) prizeClick(d);
+    });
+  }
 }
 function cardEl(c, from){
   const w=document.createElement("div"); w.className="cardwrap";
@@ -257,6 +321,14 @@ function cardEl(c, from){
 }
 function backs(n){ return Array.from({length:n}).map(()=>{const i=document.createElement("img");i.className="card";i.src=BACK;return i;}); }
 function fill(id, cards, from){ const el=$(id); if(!el)return; el.innerHTML=""; (cards||[]).forEach(c=>el.append(cardEl(c,from))); }
+// fill one opponent's public zones (real active/bench; deck/discard/prizes as backs + counts). Guards missing IDs.
+function fillOpp(pre, o){
+  o=o||{active:[],bench:[],discard:[],deck_count:0,prizes_count:0};
+  fill("#"+pre+"-active",o.active); fill("#"+pre+"-bench",o.bench);
+  const dc=$("#"+pre+"-discard"); if(dc){ dc.innerHTML=""; if(o.discard?.length){ dc.append(backs(1)[0]); tag("#"+pre+"-discard",o.discard.length); } }
+  const dk=$("#"+pre+"-deck"); if(dk){ dk.innerHTML=""; if(o.deck_count){ dk.append(backs(1)[0]); tag("#"+pre+"-deck",o.deck_count); } }
+  for(let i=0;i<3;i++){ const el=$("#"+pre+"-prize"+i); if(!el)continue; el.innerHTML=""; const n=Math.min(2,Math.max(0,(o.prizes_count||0)-i*2)); if(n){ el.append(backs(1)[0]); tag("#"+pre+"-prize"+i,n); } }
+}
 
 const TT=SB_BASE+"/storage/v1/object/public/cards/assets/tokens/";
 const TOKENS=[
@@ -298,13 +370,14 @@ async function refresh(){
   const {data,error}=await sb.rpc("game_view",{p_token:token});
   if(error){$("#status").textContent="error: "+error.message;return;}
   gameId=data.game_id; mySeat=data.seat; lastView=data; amPlayer=(data.kind!=="spectator");
+  const ts=data.table_size||2; if(builtMode!==ts){ builtMode=ts; buildBoard(); }   // (re)build once we know 2p vs 3p
   $("#tray").style.display=amPlayer?"flex":"none"; $("#hand").style.display=amPlayer?"flex":"none";
   const _c=document.querySelector("header .controls"); if(_c) _c.style.display=amPlayer?"flex":"none";
   $("#status").textContent=`seat ${data.seat} · v${data.version}`;
   const ended = data.status==="ended";
   $("#ended").style.display = ended ? "flex" : "none";
   if(ended){ $("#tray").style.display="none"; $("#hand").style.display="none"; if(_c) _c.style.display="none"; }
-  const you=data.you, opp=(data.opponents||[])[0]||{active:[],bench:[],discard:[],hand_count:0,deck_count:0,prizes_count:0};
+  const you=data.you;
   fill("#you-active",you.active,"active"); fill("#you-bench",you.bench,"bench");
   const dk=$("#you-deck"); dk.innerHTML="";
   if(you.deck_count){
@@ -323,11 +396,9 @@ async function refresh(){
     tag("#you-discard", you.discard.length);
   }
   PRIZES.forEach((p,i)=>{ const el=$("#you-prize"+i); el.innerHTML=""; const n=Math.min(2,Math.max(0,you.prizes_count-i*2)); if(n){el.append(backs(1)[0]); tag("#you-prize"+i,n);} });
-  // opponent (public zones real; hidden as backs/counts)
-  fill("#opp-active",opp.active); fill("#opp-bench",opp.bench);
-  $("#opp-discard").innerHTML=""; if(opp.discard?.length){ $("#opp-discard").append(backs(1)[0]); tag("#opp-discard",opp.discard.length); }  // face-down
-  $("#opp-deck").innerHTML=""; if(opp.deck_count){$("#opp-deck").append(backs(1)[0]); tag("#opp-deck",opp.deck_count);}
-  PRIZES.forEach((p,i)=>{ const el=$("#opp-prize"+i); el.innerHTML=""; const n=Math.min(2,Math.max(0,opp.prizes_count-i*2)); if(n){el.append(backs(1)[0]); tag("#opp-prize"+i,n);} });
+  // opponents (public zones real; hidden info as backs/counts)
+  if(builtMode===3) (data.opponents||[]).forEach(o=> fillOpp("opp"+(((o.seat||1)-1)%3), o));
+  else fillOpp("opp", (data.opponents||[])[0]);
   fill("#stadium",data.shared?.stadium,"stadium");
   fill("#hand",you.hand,"hand");
   if(gameId && !subbed){ subbed=true;
@@ -475,7 +546,7 @@ hd.addEventListener("drop", e=>{e.preventDefault(); hd.classList.remove("over");
     const m = await import("./vendor/discord-embedded-app-sdk.js");
     m.patchUrlMappings([{ prefix: "/sb", target: SB_URL.replace(/^https?:\/\//, "") }]);
   }
-  buildTray(); buildBoard(); refresh();
+  buildTray(); refresh();   // refresh() builds the 2p/3p board once table_size is known
   if (inDiscord) {
     // The realtime WebSocket doesn't traverse Discord's proxy reliably, so poll for
     // other players' moves over REST (which does). Version-gated → only re-render on change.

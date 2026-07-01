@@ -104,14 +104,26 @@ if (!inDiscord) {
     setStatus(res.has_game ? "Pick a deck to play, or spectate:" : "Pick a deck to start the table:", "muted");
     const decks = await rpc("my_decks", { p_uid: me });
     const box = $("#choose"); box.innerHTML = ""; box.classList.remove("hidden");
-    const pick = (args, label) => async () => {
+    const pick = (argsOrFn, label) => async () => {
+      const args = typeof argsOrFn === "function" ? argsOrFn() : argsOrFn;
       box.innerHTML = ""; setStatus(label + "…", "muted");
       try { seated(await rpc("activity_enter", Object.assign({ p_uid: me, p_channel: ch }, args))); }
       catch (e) { setStatus("❌ " + e.message, "err"); }
     };
+    // creating a new table? choose 2 or 3 players (joiners inherit the creator's table size)
+    let tableSize = 2;
+    if (!res.has_game) {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;gap:8px;align-items:center;margin-bottom:6px";
+      const lab = document.createElement("span"); lab.className = "muted"; lab.textContent = "Players:"; row.append(lab);
+      const paint = () => [...row.querySelectorAll("button")].forEach(b => b.className = (+b.dataset.n === tableSize ? "" : "ghost"));
+      [2, 3].forEach(n => { const b = document.createElement("button"); b.dataset.n = n; b.textContent = n;
+        b.style.cssText = "flex:none;padding:6px 14px"; b.onclick = () => { tableSize = n; paint(); }; row.append(b); });
+      paint(); box.append(row);
+    }
     (decks || []).forEach(d => {
       const b = document.createElement("button"); b.textContent = "▶  " + d.name;
-      b.onclick = pick({ p_deck_id: d.id }, "seating you");
+      b.onclick = pick(() => Object.assign({ p_deck_id: d.id }, res.has_game ? {} : { p_table_size: tableSize }), "seating you");
       box.append(b);
     });
     if (!(decks || []).length) {
