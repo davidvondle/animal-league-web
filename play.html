@@ -89,7 +89,9 @@
     <button id="draw">Draw</button>
     <button id="shuffle" class="ghost">Shuffle</button>
     <button id="search" class="ghost">Search deck</button>
-    <button id="endgame" class="ghost" style="margin-left:14px">End game</button>
+    <button id="restart" class="ghost" style="margin-left:14px">Restart</button>
+    <button id="leave" class="ghost">Leave seat</button>
+    <button id="endgame" class="ghost">End game</button>
   </span>
 </header>
 <div class="stage">
@@ -293,6 +295,14 @@ async function flipCoin(){
 $("#draw").onclick=()=>action({type:"draw"});
 $("#shuffle").onclick=()=>action({type:"shuffle"});
 $("#endgame").onclick=async()=>{ if(await askConfirm("End this game for everyone?")) action({type:"end"}); };
+$("#restart").onclick=async()=>{ if(await askConfirm("Restart the match? Everyone gets a fresh deal.")) action({type:"restart"}); };
+$("#leave").onclick=async()=>{
+  if(!await askConfirm("Leave your seat? It opens up for someone else.")) return;
+  const {error}=await sb.rpc("game_action",{p_token:token,p_action:{type:"leave"}});
+  if(error){ alert(error.message); return; }
+  if(inDiscord) location.href="/";   // back to the activity launcher to re-choose
+  else document.body.innerHTML='<div style="color:#9a9aa8;font:16px/1.5 sans-serif;padding:48px;text-align:center">You left the table.</div>';
+};
 function openSearch(title, cards, fromZone){
   $("#peektitle").textContent=title; $("#peekrow").innerHTML="";
   (cards||[]).forEach(c=>{ const i=document.createElement("img"); i.src=px(c.url); i.title=c.name;
