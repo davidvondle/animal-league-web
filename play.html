@@ -320,6 +320,16 @@ hd.addEventListener("drop", e=>{e.preventDefault(); hd.classList.remove("over");
     m.patchUrlMappings([{ prefix: "/sb", target: SB_URL.replace(/^https?:\/\//, "") }]);
   }
   buildTray(); buildBoard(); refresh();
+  if (inDiscord) {
+    // The realtime WebSocket doesn't traverse Discord's proxy reliably, so poll for
+    // other players' moves over REST (which does). Version-gated → only re-render on change.
+    setInterval(async () => {
+      try {
+        const { data } = await sb.rpc("game_view", { p_token: token });
+        if (data && lastView && data.version !== lastView.version) refresh();
+      } catch (e) {}
+    }, 2500);
+  }
 })();
 </script>
 </body>
