@@ -223,9 +223,11 @@ function cardEl(c, from){
     const badge=document.createElement("div"); badge.className="hpbadge"; badge.textContent=c.hp; w.append(badge);
     if(from && amPlayer){
       const pop=document.createElement("div"); pop.className="hppop";
-      const mn=document.createElement("button"); mn.textContent="−"; mn.addEventListener("click", ev=>{ ev.stopPropagation(); setHP(from,c.id,Math.max(0,(c.hp||0)-10)); });
       const v=document.createElement("span"); v.textContent=c.hp;
-      const pl=document.createElement("button"); pl.textContent="+"; pl.addEventListener("click", ev=>{ ev.stopPropagation(); setHP(from,c.id,(c.hp||0)+10); });
+      // update badge + value in place and send a no-refresh action, so the hovered popup isn't rebuilt out from under the pointer
+      const bump=(d)=>{ c.hp=Math.max(0,(c.hp||0)+d); badge.textContent=c.hp; v.textContent=c.hp; actionQuiet({type:"update_card",zone:from,card:c.id,patch:{hp:c.hp},silent:true}); };
+      const mn=document.createElement("button"); mn.textContent="−"; mn.addEventListener("click", ev=>{ ev.stopPropagation(); bump(-10); });
+      const pl=document.createElement("button"); pl.textContent="+"; pl.addEventListener("click", ev=>{ ev.stopPropagation(); bump(10); });
       pop.append(mn, v, pl); w.append(pop);
     }
   }
@@ -322,6 +324,9 @@ async function refresh(){
 }
 function tag(sel,n){ const e=document.createElement("div"); e.className="count"; e.textContent=n; $(sel).append(e); }
 async function action(a){ const {error}=await sb.rpc("game_action",{p_token:token,p_action:a}); if(error)alert(error.message); else refresh(); }
+// like action() but skips the local re-render — for optimistic in-place tweaks (HP nudges) that would
+// otherwise rebuild the card mid-hover and drop the popup. The poll/realtime reconciles later.
+async function actionQuiet(a){ const {error}=await sb.rpc("game_action",{p_token:token,p_action:a}); if(error)alert(error.message); }
 const move=(from,to,card)=>action({type:"move",from,to,card});
 const update=(zone,card,patch,silent)=>action({type:"update_card",zone,card,patch,silent});
 const attach=(from,card,zone,target)=>action({type:"attach",from,card,zone,target});  // stack `card` behind `target`
